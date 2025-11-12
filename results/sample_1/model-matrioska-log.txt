@@ -1,0 +1,1126 @@
+PROMPT:
+==========================================
+
+You are Matrioska Architect. Decompose user requests into isolated modules that communicate via shared_state.
+
+RULES:
+1. Each module can READ from shared_state (dependencies)
+2. Each module can WRITE to shared_state (outputs)
+3. Specify exactly what each module reads/writes
+4. CODE GUIDELINES:
+   - Keep implementation concepts SIMPLE and CLEAN
+   - Prefer direct, minimal solutions over complex ones
+   - You may suggest using CDNs (Bootstrap, SweetAlert, etc.)
+   - You may suggest libraries (Flask, SQLAlchemy, etc.) listed in requirements.txt or similar if relevant
+   - Avoid complex build systems unless strictly required
+   - Include only essential dependencies
+
+EXAMPLE:
+Request: "Library management system with dashboard"
+Output: {
+  "project_name": "Library Management System",
+  "general_manual": {
+    "goal": "Create a complete library management system with authentication, CRUD, and dashboard",
+    "modules": [
+      {
+        "id": "html_structure",
+        "name": "HTML Structure",
+        "description": "Design all HTML pages and navigation layout",
+        "inputs": "design requirements",
+        "outputs": "HTML page structure with element IDs",
+        "dependencies": [],
+        "rules": "Use semantic HTML5 and IDs. Keep structure simple. You may suggest Bootstrap via CDN for layout.",
+        "shared_state_reads": [],
+        "shared_state_writes": ["element_ids", "page_structure"]
+      },
+      {
+        "id": "css_styling",
+        "name": "CSS Styling",
+        "description": "Define visual style for all pages",
+        "inputs": "HTML structure",
+        "outputs": "CSS file or theme reference",
+        "dependencies": ["html_structure"],
+        "rules": "Use element_ids from shared_state. May suggest Bootstrap themes or custom CSS. Keep style cohesive and simple.",
+        "shared_state_reads": ["element_ids", "page_structure"],
+        "shared_state_writes": ["css_classes", "color_scheme"]
+      },
+      {
+        "id": "auth_logic",
+        "name": "Authentication Logic",
+        "description": "Login/logout using localStorage or backend API",
+        "inputs": "HTML IDs",
+        "outputs": "Auth logic plan",
+        "dependencies": ["html_structure"],
+        "rules": "Use element_ids. May suggest SweetAlert for alerts. Keep logic lightweight and avoid heavy frameworks.",
+        "shared_state_reads": ["element_ids"],
+        "shared_state_writes": ["auth_api", "storage_keys"]
+      },
+      {
+        "id": "backend_api",
+        "name": "Backend API (Python)",
+        "description": "Define backend API endpoints and dependencies",
+        "inputs": "functional requirements",
+        "outputs": "API contract and dependency list",
+        "dependencies": ["auth_logic"],
+        "rules": "Propose a simple Flask or FastAPI backend. List dependencies in requirements.txt (e.g. Flask, SQLAlchemy).",
+        "shared_state_reads": ["auth_api"],
+        "shared_state_writes": ["api_routes", "db_models"]
+      }
+    ],
+    "integration_rules": "Combine all modules ensuring consistent shared_state keys. Use CDNs in HTML suggestions and requirements.txt for backend dependencies."
+  },
+  "specific_manuals": [
+    {
+      "module_id": "html_structure",
+      "manual_text": "Define HTML structure for login, catalog, and dashboard pages. Use IDs like #loginForm, #bookList, #dashboardStats. Mention that Bootstrap via CDN may be used for layout consistency. Extract all IDs and write them to shared_state as 'element_ids'."
+    }
+  ]
+}
+
+NOW PROCESS THIS REQUEST:
+
+make the snake game for web. With database to save player's score
+==========================================
+RESULT:
+==========================================
+
+and high scores.
+
+{
+  "project_name": "Snake Game",
+  "general_manual": {
+    "goal": "Create a web-based snake game with a database to save player scores and high scores",
+    "modules": [
+      {
+        "id": "game_logic",
+        "name": "Game Logic",
+        "description": "Define game rules, player controls, and game over conditions",
+        "inputs": "game requirements",
+        "outputs": "Game logic plan",
+        "dependencies": [],
+        "rules": "Keep logic simple and easy to understand. Define player controls, game over conditions, and game rules.",
+        "shared_state_reads": [],
+        "shared_state_writes": ["game_rules", "player_controls"]
+      },
+      {
+        "id": "game_visuals",
+        "name": "Game Visuals",
+        "description": "Design the game's visual elements, including the snake, food, and game board",
+        "inputs": "game logic",
+        "outputs": "Visual design plan",
+        "dependencies": ["game_logic"],
+        "rules": "Design simple and clean visuals. Use CSS to style the game elements. May suggest a CDN for game fonts or icons.",
+        "shared_state_reads": ["game_rules", "player_controls"],
+        "shared_state_writes": ["visual_elements"]
+      },
+      {
+        "id": "database_setup",
+        "name": "Database Setup",
+        "description": "Set up a database to store player scores and high scores",
+        "inputs": "functional requirements",
+        "outputs": "Database schema and connection plan",
+        "dependencies": [],
+        "rules": "Propose a simple SQLite or PostgreSQL database. List dependencies in requirements.txt (e.g. SQLAlchemy).",
+        "shared_state_reads": [],
+        "shared_state_writes": ["db_schema", "db_connection"]
+      },
+      {
+        "id": "database_interaction",
+        "name": "Database Interaction",
+        "description": "Define functions to save player scores and retrieve high scores",
+        "inputs": "database setup",
+        "outputs": "Database interaction plan",
+        "dependencies": ["database_setup"],
+        "rules": "Define functions to save player scores and retrieve high scores. Keep interaction simple and efficient.",
+        "shared_state_reads": ["db_schema", "db_connection"],
+        "shared_state_writes": ["save_score", "get_high_scores"]
+      },
+      {
+        "id": "game_controller",
+        "name": "Game Controller",
+        "description": "Combine game logic, visuals, and database interaction to create the game controller",
+        "inputs": ["game_logic", "game_visuals", "database_interaction"],
+        "outputs": "Game controller plan",
+        "dependencies": ["game_logic", "game_visuals", "database_interaction"],
+        "rules": "Combine game logic, visuals, and database interaction to create the game controller. Keep the controller simple and efficient.",
+        "shared_state_reads": ["game_rules", "player_controls", "visual_elements", "save_score", "get_high_scores"],
+        "shared_state_writes": []
+      }
+    ],
+    "integration_rules": "Combine all modules ensuring consistent shared_state keys. Use CDNs in visual suggestions and requirements.txt for database dependencies."
+  },
+  "specific_manuals": [
+    {
+      "module_id": "game_logic",
+      "manual_text": "Define the game rules, player controls, and game over conditions. For example, the snake can move up, down, left, and right using arrow keys. The game ends when the snake hits the border or itself. The player's score increases with each piece of food consumed."
+    },
+    {
+      "module_id": "game_visuals",
+      "manual_text": "Design the game's visual elements, including the snake, food, and game board. Use CSS to style the game elements. For example, the snake can be represented by a series of squares, and the food can be represented by a circle. Use a CDN for game fonts or icons if necessary."
+    },
+    {
+      "module_id": "database_setup",
+      "manual_text": "Set up a database to store player scores and high scores. Define the database schema, including tables for players and scores. Use SQLAlchemy to interact with the database. List dependencies in requirements.txt."
+    },
+    {
+      "module_id": "database_interaction",
+      "manual_text": "Define functions to save player scores and retrieve high scores. For example, save_score function should take the player's score as an argument and insert it into the database. The get_high_scores function should retrieve the top scores from the database."
+    },
+    {
+      "module_id": "game_controller",
+      "manual_text": "Combine game logic, visuals, and database interaction to create the game controller. For example, the game controller should update the game state based on player input, render the game visuals, and call the save_score function when the player consumes food."
+    }
+  ]
+}
+
+
+
+PROMPT:
+==========================================
+
+MODULE: Game Logic
+
+MANUAL:
+Define the game rules, player controls, and game over conditions. For example, the snake can move up, down, left, and right using arrow keys. The game ends when the snake hits the border or itself. The player's score increases with each piece of food consumed.
+
+RULES:
+Keep logic simple and easy to understand. Define player controls, game over conditions, and game rules.
+
+Execute this task. If you generate data that other modules need, list them at the end in the format:
+SHARED_STATE_UPDATE:
+{
+  "key1": "value1",
+  "key2": ["item1", "item2"]
+}
+
+==========================================
+RESULT:
+==========================================
+
+PLAYER_CONTROLS:
+{
+  "up": "move_up",
+  "down": "move_down",
+  "left": "move_left",
+  "right": "move_right"
+}
+
+GAME_OVER_CONDITIONS:
+{
+  "border_hit": "game_over",
+  "self_hit": "game_over"
+}
+
+GAME_RULES:
+{
+  "food_consumption": "increase_score",
+  "speed_increase": "increase_speed",
+  "length_increase": "increase_length"
+}
+
+SHARED_STATE_UPDATE:
+{
+  "score": 0,
+  "speed": 100,
+  "length": 3
+}
+
+
+
+PROMPT:
+==========================================
+
+MODULE: Game Visuals
+
+MANUAL:
+Design the game's visual elements, including the snake, food, and game board. Use CSS to style the game elements. For example, the snake can be represented by a series of squares, and the food can be represented by a circle. Use a CDN for game fonts or icons if necessary.
+
+RULES:
+Design simple and clean visuals. Use CSS to style the game elements. May suggest a CDN for game fonts or icons.
+
+Execute this task. If you generate data that other modules need, list them at the end in the format:
+SHARED_STATE_UPDATE:
+{
+  "key1": "value1",
+  "key2": ["item1", "item2"]
+}
+
+==========================================
+RESULT:
+==========================================
+
+SOLUTION:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Game</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css" integrity="sha512-xh6Q/w6FZRK/sORAl14MVWouTBl7TBK/S/xz0utmajQIM7fq/alwXN8b/zcASlCUI6Kis4CFs3CSU9PT/Ic4Q==" crossorigin="anonymous">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f5dc;
+    }
+
+    .game-board {
+      display: grid;
+      grid-template-columns: repeat(10, 30px);
+      grid-template-rows: repeat(20, 30px);
+      gap: 1px;
+      border: 1px solid #000;
+      padding: 10px;
+    }
+
+    .snake,
+    .food {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+    }
+
+    .snake {
+      position: relative;
+    }
+
+    .snake-head {
+      background-color: #00ff7f;
+    }
+
+    .snake-body {
+      background-color: #00ff00;
+    }
+
+    .food {
+      background-color: #ffd700;
+    }
+
+    .score {
+      font-size: 24px;
+      text-align: center;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-board">
+    <!-- Snake elements will be inserted here -->
+  </div>
+  <div id="score" class="score">Score: 0</div>
+
+  <script>
+    // Your JavaScript code for the game logic goes here
+  </script>
+</body>
+</html>
+```
+
+SHARED_STATE_UPDATE:
+{
+  "snakeElements": ["snake-head-element", "snake-body-element1", "snake-body-element2"],
+  "foodElement": "food-element"
+}
+
+
+
+PROMPT:
+==========================================
+
+MODULE: Database Setup
+
+MANUAL:
+Set up a database to store player scores and high scores. Define the database schema, including tables for players and scores. Use SQLAlchemy to interact with the database. List dependencies in requirements.txt.
+
+RULES:
+Propose a simple SQLite or PostgreSQL database. List dependencies in requirements.txt (e.g. SQLAlchemy).
+
+Execute this task. If you generate data that other modules need, list them at the end in the format:
+SHARED_STATE_UPDATE:
+{
+  "key1": "value1",
+  "key2": ["item1", "item2"]
+}
+
+==========================================
+RESULT:
+==========================================
+
+DEPENDENCIES:
+- SQLAlchemy
+
+DATABASE SETUP:
+
+1. Install SQLAlchemy:
+```
+pip install SQLAlchemy
+```
+
+2. Create a new file `database.py` to handle the database connection and models.
+
+3. Define the database connection in `database.py`:
+
+```python
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
+
+DATABASE_URL = "sqlite:///games.db"
+
+engine = create_engine(DATABASE_URL)
+Session = sessionmaker(bind=engine)
+```
+
+4. Define the Player and Score models:
+
+```python
+class Player(Base):
+    __tablename__ = "players"
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+
+class Score(Base):
+    __tablename__ = "scores"
+    id = Column(Integer, primary_key=True)
+    player_id = Column(Integer, ForeignKey("players.id"))
+    score = Column(Integer)
+    player = relationship("Player", back_populates="scores")
+```
+
+5. Create the tables if they don't exist:
+
+```python
+Base.metadata.create_all(engine)
+```
+
+6. Now you can use the `Session` object to interact with the database:
+
+```python
+session = Session()
+
+# Insert a new player
+new_player = Player(name="John Doe")
+session.add(new_player)
+session.commit()
+
+# Insert a new score for the player
+new_score = Score(player_id=new_player.id, score=1000)
+session.add(new_score)
+session.commit()
+```
+
+7. To retrieve data, you can use the `query` method:
+
+```python
+player = session.query(Player).filter_by(name="John Doe").first()
+scores = session.query(Score).filter_by(player_id=player.id).all()
+```
+
+8. Don't forget to close the session after use:
+
+```python
+session.close()
+```
+
+SHARED_STATE_UPDATE:
+{
+  "database_url": "sqlite:///games.db"
+}
+
+
+
+PROMPT:
+==========================================
+
+MODULE: Database Interaction
+
+MANUAL:
+Define functions to save player scores and retrieve high scores. For example, save_score function should take the player's score as an argument and insert it into the database. The get_high_scores function should retrieve the top scores from the database.
+
+RULES:
+Define functions to save player scores and retrieve high scores. Keep interaction simple and efficient.
+
+Execute this task. If you generate data that other modules need, list them at the end in the format:
+SHARED_STATE_UPDATE:
+{
+  "key1": "value1",
+  "key2": ["item1", "item2"]
+}
+
+==========================================
+RESULT:
+==========================================
+
+```python
+import sqlite3
+
+def setup_database():
+    conn = sqlite3.connect('high_scores.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS high_scores (
+                            id INTEGER PRIMARY KEY,
+                            score INTEGER,
+                            name TEXT)''')
+    conn.commit()
+    conn.close()
+
+def save_score(name, score):
+    conn = sqlite3.connect('high_scores.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO high_scores (score, name) VALUES (?, ?)", (score, name))
+    conn.commit()
+    conn.close()
+
+def get_high_scores():
+    conn = sqlite3.connect('high_scores.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM high_scores ORDER BY score DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+setup_database()
+save_score('Player1', 1000)
+save_score('Player2', 900)
+save_score('Player3', 800)
+high_scores = get_high_scores()
+print(high_scores)
+
+SHARED_STATE_UPDATE:
+{
+  "high_scores": high_scores
+}
+```
+
+In this example, we have defined functions to save player scores and retrieve high scores using SQLite. The setup_database function initializes the database if it doesn't exist. The save_score function saves a player's score and name into the database. The get_high_scores function retrieves the top scores from the database.
+
+We have also shared the high scores retrieved from the database for other modules to use.
+
+
+
+PROMPT:
+==========================================
+
+MODULE: Game Controller
+
+MANUAL:
+Combine game logic, visuals, and database interaction to create the game controller. For example, the game controller should update the game state based on player input, render the game visuals, and call the save_score function when the player consumes food.
+
+RULES:
+Combine game logic, visuals, and database interaction to create the game controller. Keep the controller simple and efficient.
+
+Execute this task. If you generate data that other modules need, list them at the end in the format:
+SHARED_STATE_UPDATE:
+{
+  "key1": "value1",
+  "key2": ["item1", "item2"]
+}
+
+==========================================
+RESULT:
+==========================================
+
+GAME_CONTROLLER:
+
+function startGame() {
+  // Initialize game state
+  let gameState = {
+    score: 0,
+    level: 1,
+    food: [],
+    player: {
+      x: 10,
+      y: 10,
+      speed: 2
+    }
+  };
+
+  // Initialize visuals
+  createVisualElements(gameState);
+
+  // Initialize event listeners
+  document.addEventListener('keydown', handleKeyDown);
+  document.addEventListener('keyup', handleKeyUp);
+
+  // Update game state and visuals in game loop
+  gameLoop();
+}
+
+function gameLoop() {
+  // Update game state
+  updateGameState();
+
+  // Render game visuals
+  renderGameVisual();
+
+  // Call save_score function when the player consumes food
+  checkForFoodCollision();
+
+  // Request next frame
+  requestAnimationFrame(gameLoop);
+}
+
+function updateGameState() {
+  // Move the player
+  movePlayer();
+
+  // Generate new food
+  generateFood();
+}
+
+function renderGameVisual() {
+  // Clear the canvas
+  clearCanvas();
+
+  // Draw the game visuals
+  drawFood();
+  drawPlayer();
+}
+
+function handleKeyDown(event) {
+  // Move the player when a key is pressed
+  if (event.key === 'ArrowUp') {
+    player.y -= player.speed;
+  } else if (event.key === 'ArrowDown') {
+    player.y += player.speed;
+  } else if (event.key === 'ArrowLeft') {
+    player.x -= player.speed;
+  } else if (event.key === 'ArrowRight') {
+    player.x += player.speed;
+  }
+}
+
+function handleKeyUp(event) {
+  // Stop moving the player when a key is released
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    player.y = player.y;
+    player.x = player.x;
+  }
+}
+
+function movePlayer() {
+  // Check if the player has hit the edge of the canvas
+  if (player.x < 0) {
+    player.x = 0;
+  } else if (player.x > canvas.width - player.size) {
+    player.x = canvas.width - player.size;
+  }
+
+  if (player.y < 0) {
+    player.y = 0;
+  } else if (player.y > canvas.height - player.size) {
+    player.y = canvas.height - player.size;
+  }
+}
+
+function generateFood() {
+  // Generate a new food object
+  let food = {
+    x: Math.floor(Math.random() * (canvas.width - food.size)),
+    y: Math.floor(Math.random() * (canvas.height - food.size)),
+    size: 20
+  };
+
+  // Check if the new food is overlapping with an existing food
+  if (foodIsOverlapping(food, gameState.food)) {
+    generateFood();
+  } else {
+    gameState.food.push(food);
+  }
+}
+
+function foodIsOverlapping(food1, food2) {
+  // Check if two food objects are overlapping
+  return (
+    food1.x < food2.x + food2.size &&
+    food1.x + food1.size > food2.x &&
+    food1.y < food2.y + food2.size &&
+    food1.y + food1.size > food2.y
+  );
+}
+
+function checkForFoodCollision() {
+  // Check if the player has collided with any food
+  for (let i = 0; i < gameState.food.length; i++) {
+    if (playerIsCollidingWith(gameState.player, gameState.food[i])) {
+      // Increment the score
+      gameState.score++;
+
+      // Remove the collided food from the game state
+      gameState.food.splice(i, 1);
+
+      // Call the save_score function
+      saveScore(gameState.score);
+
+      // Generate new food
+      generateFood();
+
+      // Increase the level
+      gameState.level++;
+
+      // Increase the speed of the player
+      player.speed += 0.1;
+    }
+  }
+}
+
+function playerIsCollidingWith(player, food) {
+  // Check if the player is colliding with the food
+  return (
+    player.x < food.x + food.size &&
+    player.x + player.size > food.x &&
+    player.y < food.y + food.size &&
+    player.y + player.size > food.y
+  );
+}
+
+SHARED_STATE_UPDATE:
+{
+  "score": gameState.score,
+  "level": gameState.level
+}
+
+
+
+PROMPT:
+==========================================
+
+PROJECT: Snake Game
+
+INTEGRATION RULES:
+Combine all modules ensuring consistent shared_state keys. Use CDNs in visual suggestions and requirements.txt for database dependencies.
+
+SHARED STATE (Contracts between modules):
+{
+  "score": 0,
+  "speed": 100,
+  "length": 3,
+  "snakeElements": [
+    "snake-head-element",
+    "snake-body-element1",
+    "snake-body-element2"
+  ],
+  "foodElement": "food-element",
+  "database_url": "sqlite:///games.db"
+}
+
+ARTIFACTS:
+
+============================================================
+Game Logic
+============================================================
+PLAYER_CONTROLS:
+{
+  "up": "move_up",
+  "down": "move_down",
+  "left": "move_left",
+  "right": "move_right"
+}
+
+GAME_OVER_CONDITIONS:
+{
+  "border_hit": "game_over",
+  "self_hit": "game_over"
+}
+
+GAME_RULES:
+{
+  "food_consumption": "increase_score",
+  "speed_increase": "increase_speed",
+  "length_increase": "increase_length"
+}
+
+SHARED_STATE_UPDATE:
+{
+  "score": 0,
+  "speed": 100,
+  "length": 3
+}
+
+============================================================
+Game Visuals
+============================================================
+SOLUTION:
+
+```html
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>Snake Game</title>
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.2.0/css/all.min.css" integrity="sha512-xh6Q/w6FZRK/sORAl14MVWouTBl7TBK/S/xz0utmajQIM7fq/alwXN8b/zcASlCUI6Kis4CFs3CSU9PT/Ic4Q==" crossorigin="anonymous">
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background-color: #f5f5dc;
+    }
+
+    .game-board {
+      display: grid;
+      grid-template-columns: repeat(10, 30px);
+      grid-template-rows: repeat(20, 30px);
+      gap: 1px;
+      border: 1px solid #000;
+      padding: 10px;
+    }
+
+    .snake,
+    .food {
+      width: 30px;
+      height: 30px;
+      border-radius: 50%;
+    }
+
+    .snake {
+      position: relative;
+    }
+
+    .snake-head {
+      background-color: #00ff7f;
+    }
+
+    .snake-body {
+      background-color: #00ff00;
+    }
+
+    .food {
+      background-color: #ffd700;
+    }
+
+    .score {
+      font-size: 24px;
+      text-align: center;
+      margin-top: 20px;
+    }
+  </style>
+</head>
+<body>
+  <div class="game-board">
+    <!-- Snake elements will be inserted here -->
+  </div>
+  <div id="score" class="score">Score: 0</div>
+
+  <script>
+    // Your JavaScript code for the game logic goes here
+  </script>
+</body>
+</html>
+```
+
+SHARED_STATE_UPDATE:
+{
+  "snakeElements": ["snake-head-element", "snake-body-element1", "snake-body-element2"],
+  "foodElement": "food-element"
+}
+
+============================================================
+Database Setup
+============================================================
+DEPENDENCIES:
+- SQLAlchemy
+
+DATABASE SETUP:
+
+1. Install SQLAlchemy:
+```
+pip install SQLAlchemy
+```
+
+2. Create a new file `database.py` to handle the database connection and models.
+
+3. Define the database connection in `database.py`:
+
+```python
+from sqlalchemy import create_engine, Column, Integer, String, ForeignKey
+from sqlalchemy.ext.declarative import declarative_base
+from sqlalchemy.orm import sessionmaker
+
+Base = declarative_base()
+
+DATABASE_URL = "sqlite:///games.db"
+
+engine = create_engine(DATABASE_URL)
+Session = sessionmaker(bind=engine)
+```
+
+4. Define the Player and Score models:
+
+```python
+class Player(Base):
+    __tablename__ = "players"
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+
+class Score(Base):
+    __tablename__ = "scores"
+    id = Column(Integer, primary_key=True)
+    player_id = Column(Integer, ForeignKey("players.id"))
+    score = Column(Integer)
+    player = relationship("Player", back_populates="scores")
+```
+
+5. Create the tables if they don't exist:
+
+```python
+Base.metadata.create_all(engine)
+```
+
+6. Now you can use the `Session` object to interact with the database:
+
+```python
+session = Session()
+
+# Insert a new player
+new_player = Player(name="John Doe")
+session.add(new_player)
+session.commit()
+
+# Insert a new score for the player
+new_score = Score(player_id=new_player.id, score=1000)
+session.add(new_score)
+session.commit()
+```
+
+7. To retrieve data, you can use the `query` method:
+
+```python
+player = session.query(Player).filter_by(name="John Doe").first()
+scores = session.query(Score).filter_by(player_id=player.id).all()
+```
+
+8. Don't forget to close the session after use:
+
+```python
+session.close()
+```
+
+SHARED_STATE_UPDATE:
+{
+  "database_url": "sqlite:///games.db"
+}
+
+============================================================
+Database Interaction
+============================================================
+```python
+import sqlite3
+
+def setup_database():
+    conn = sqlite3.connect('high_scores.db')
+    cursor = conn.cursor()
+    cursor.execute('''CREATE TABLE IF NOT EXISTS high_scores (
+                            id INTEGER PRIMARY KEY,
+                            score INTEGER,
+                            name TEXT)''')
+    conn.commit()
+    conn.close()
+
+def save_score(name, score):
+    conn = sqlite3.connect('high_scores.db')
+    cursor = conn.cursor()
+    cursor.execute("INSERT INTO high_scores (score, name) VALUES (?, ?)", (score, name))
+    conn.commit()
+    conn.close()
+
+def get_high_scores():
+    conn = sqlite3.connect('high_scores.db')
+    cursor = conn.cursor()
+    cursor.execute("SELECT * FROM high_scores ORDER BY score DESC")
+    rows = cursor.fetchall()
+    conn.close()
+    return rows
+
+setup_database()
+save_score('Player1', 1000)
+save_score('Player2', 900)
+save_score('Player3', 800)
+high_scores = get_high_scores()
+print(high_scores)
+
+SHARED_STATE_UPDATE:
+{
+  "high_scores": high_scores
+}
+```
+
+In this example, we have defined functions to save player scores and retrieve high scores using SQLite. The setup_database function initializes the database if it doesn't exist. The save_score function saves a player's score and name into the database. The get_high_scores function retrieves the top scores from the database.
+
+We have also shared the high scores retrieved from the database for other modules to use.
+
+============================================================
+Game Controller
+============================================================
+GAME_CONTROLLER:
+
+function startGame() {
+  // Initialize game state
+  let gameState = {
+    score: 0,
+    level: 1,
+    food: [],
+    player: {
+      x: 10,
+      y: 10,
+      speed: 2
+    }
+  };
+
+  // Initialize visuals
+  createVisualElements(gameState);
+
+  // Initialize event listeners
+  document.addEventListener('keydown', handleKeyDown);
+  document.addEventListener('keyup', handleKeyUp);
+
+  // Update game state and visuals in game loop
+  gameLoop();
+}
+
+function gameLoop() {
+  // Update game state
+  updateGameState();
+
+  // Render game visuals
+  renderGameVisual();
+
+  // Call save_score function when the player consumes food
+  checkForFoodCollision();
+
+  // Request next frame
+  requestAnimationFrame(gameLoop);
+}
+
+function updateGameState() {
+  // Move the player
+  movePlayer();
+
+  // Generate new food
+  generateFood();
+}
+
+function renderGameVisual() {
+  // Clear the canvas
+  clearCanvas();
+
+  // Draw the game visuals
+  drawFood();
+  drawPlayer();
+}
+
+function handleKeyDown(event) {
+  // Move the player when a key is pressed
+  if (event.key === 'ArrowUp') {
+    player.y -= player.speed;
+  } else if (event.key === 'ArrowDown') {
+    player.y += player.speed;
+  } else if (event.key === 'ArrowLeft') {
+    player.x -= player.speed;
+  } else if (event.key === 'ArrowRight') {
+    player.x += player.speed;
+  }
+}
+
+function handleKeyUp(event) {
+  // Stop moving the player when a key is released
+  if (event.key === 'ArrowUp' || event.key === 'ArrowDown' || event.key === 'ArrowLeft' || event.key === 'ArrowRight') {
+    player.y = player.y;
+    player.x = player.x;
+  }
+}
+
+function movePlayer() {
+  // Check if the player has hit the edge of the canvas
+  if (player.x < 0) {
+    player.x = 0;
+  } else if (player.x > canvas.width - player.size) {
+    player.x = canvas.width - player.size;
+  }
+
+  if (player.y < 0) {
+    player.y = 0;
+  } else if (player.y > canvas.height - player.size) {
+    player.y = canvas.height - player.size;
+  }
+}
+
+function generateFood() {
+  // Generate a new food object
+  let food = {
+    x: Math.floor(Math.random() * (canvas.width - food.size)),
+    y: Math.floor(Math.random() * (canvas.height - food.size)),
+    size: 20
+  };
+
+  // Check if the new food is overlapping with an existing food
+  if (foodIsOverlapping(food, gameState.food)) {
+    generateFood();
+  } else {
+    gameState.food.push(food);
+  }
+}
+
+function foodIsOverlapping(food1, food2) {
+  // Check if two food objects are overlapping
+  return (
+    food1.x < food2.x + food2.size &&
+    food1.x + food1.size > food2.x &&
+    food1.y < food2.y + food2.size &&
+    food1.y + food1.size > food2.y
+  );
+}
+
+function checkForFoodCollision() {
+  // Check if the player has collided with any food
+  for (let i = 0; i < gameState.food.length; i++) {
+    if (playerIsCollidingWith(gameState.player, gameState.food[i])) {
+      // Increment the score
+      gameState.score++;
+
+      // Remove the collided food from the game state
+      gameState.food.splice(i, 1);
+
+      // Call the save_score function
+      saveScore(gameState.score);
+
+      // Generate new food
+      generateFood();
+
+      // Increase the level
+      gameState.level++;
+
+      // Increase the speed of the player
+      player.speed += 0.1;
+    }
+  }
+}
+
+function playerIsCollidingWith(player, food) {
+  // Check if the player is colliding with the food
+  return (
+    player.x < food.x + food.size &&
+    player.x + player.size > food.x &&
+    player.y < food.y + food.size &&
+    player.y + player.size > food.y
+  );
+}
+
+SHARED_STATE_UPDATE:
+{
+  "score": gameState.score,
+  "level": gameState.level
+}
+
+
+Integrate the artifacts following the rules. Use the SHARED STATE to ensure that IDs, APIs and contracts are consistent.
+==========================================
+RESULT:
+==========================================
+
+
+
+
+
