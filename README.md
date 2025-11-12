@@ -220,7 +220,7 @@ files.download('matrioska_results.zip')
 
 ## 🛠️ Technical Requirements
 
-* **GPU**: NVIDIA T4 (16GB VRAM) or higher
+* **GPU**: NVIDIA T4 (8GB VRAM) or higher
 * **RAM**: 16GB+
 * **Python**: 3.8+
 * **Libraries**: transformers, torch, bitsandbytes, sentencepiece
