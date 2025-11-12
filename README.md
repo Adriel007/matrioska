@@ -225,6 +225,28 @@ files.download('matrioska_results.zip')
 * **Python**: 3.8+
 * **Libraries**: transformers, torch, bitsandbytes, sentencepiece
 
+## 🚫 Issues and Limitations
+
+* **Model Dependency**: The quality of outputs is linearly dependent on the base model's capabilities. More powerful models (GPT-4, Claude 3, etc.) produce significantly better results, while smaller models may struggle with complex decompositions.
+
+* **Token Consumption**: The modular approach consumes substantially more tokens compared to direct generation. For paid API services (OpenAI, Anthropic, etc.), this can lead to significantly higher costs, making it economically challenging for large-scale projects.
+
+* **Processing Time**: Sequential module execution results in longer processing times compared to single-prompt approaches. The architecture phase + multiple module generations + integration phase creates inherent latency.
+
+* **Project Suitability**: Not recommended for small or simple projects where direct generation would be more efficient. The overhead of architectural decomposition outweighs benefits for basic applications, scripts, or single-component systems.
+
+* **Complexity Overhead**: Introduces additional abstraction layers that may not be justified for straightforward tasks. The shared state management and module coordination add complexity that only pays off in sufficiently complex systems.
+
+* **Error Propagation**: Module dependencies create chain reaction risks - errors in early modules can propagate through subsequent modules, requiring complete regeneration cycles.
+
+* **Integration Challenges**: While shared state helps, final integration still requires careful validation. Module outputs may not always seamlessly combine without manual intervention or additional refinement cycles.
+
+* **Resource Intensive**: Requires significant computational resources for optimal performance, making it less suitable for resource-constrained environments or edge deployment scenarios.
+
+* **Expertise Requirement**: Effective usage requires understanding of both the domain problem and the orchestration system, creating a steeper learning curve compared to direct model interaction.
+
+* **API Rate Limiting**: Multiple sequential API calls may encounter rate limiting issues with commercial providers, potentially disrupting longer orchestration workflows.
+
 ## 🔮 Roadmap
 
 * [ ] Multi-LLM support
