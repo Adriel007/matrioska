@@ -8,7 +8,7 @@
 
 - [Github repo](https://github.com/adriel007/matrioska)
 
-- [Google Colab](https://colab.research.google.com/drive/1Vq3b7Xu5z2Un0n3_6_dQVYWQrX4fsK0j#scrollTo=3uw0inKtuNS0)
+- [Google Colab](https://colab.research.google.com/drive/1Vq3b7Xu5z2Un0n3_6_dQVYWQrX4fsK0j)
 
 ### 📋 Overview
 
