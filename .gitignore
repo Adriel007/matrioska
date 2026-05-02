@@ -1,0 +1,7 @@
+.venv/
+.pytest_cache/
+logs/
+.chromadb/
+__pycache__/
+.claude/
+.mypy_cache/
