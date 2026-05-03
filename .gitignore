@@ -1,0 +1,11 @@
+.venv/
+.pytest_cache/
+logs/
+.chromadb/
+__pycache__/
+.claude/
+.mypy_cache/
+.env
+
+# Generated artifacts and checkpoints from pipeline runs
+matrioska_work/

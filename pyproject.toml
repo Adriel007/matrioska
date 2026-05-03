@@ -1,0 +1,71 @@
+[project]
+name = "matrioska"
+version = "3.0.0-alpha"
+description = "Matrioska V3 — Modular monolith LLM orchestrator with contract-first multi-agent code generation"
+readme = "README.md"
+requires-python = ">=3.11"
+license = { text = "MIT" }
+authors = [{ name = "Adriel", email = "adriel@matrioska.dev" }]
+keywords = ["llm", "multi-agent", "code-generation", "orchestrator", "dag"]
+
+dependencies = [
+    "httpx>=0.27,<1.0",
+    "python-dotenv>=1.0",
+    "json-repair>=0.25",
+    "pyyaml>=6.0",
+    "pydantic>=2.0",
+    "rich>=13.0",
+    "textual>=0.60",
+    "chromadb>=0.5",
+]
+
+[project.optional-dependencies]
+# Heavier / optional dependency groups
+dspy = ["dspy-ai>=2.0"]
+anthropic = ["anthropic>=0.40"]
+sandbox = ["docker>=7.0"]
+otel = [
+    "opentelemetry-api>=1.25",
+    "opentelemetry-sdk>=1.25",
+    "opentelemetry-exporter-otlp>=1.25",
+]
+mcp = ["mcp>=1.0"]
+dev = [
+    "pytest>=8.0",
+    "pytest-asyncio>=0.24",
+    "pytest-xdist>=3.5",
+    "ruff>=0.5",
+    "mypy>=1.10",
+]
+all = [
+    "matrioska[dspy,anthropic,sandbox,otel,mcp,dev]",
+]
+
+[project.scripts]
+matrioska = "matrioska.cli.main:main"
+
+[project.urls]
+Repository = "https://github.com/adriel/matrioska"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/matrioska"]
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "N", "W", "UP", "B", "SIM"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+asyncio_mode = "auto"
+
+[tool.mypy]
+python_version = "3.11"
+check_untyped_defs = true
+ignore_missing_imports = true
