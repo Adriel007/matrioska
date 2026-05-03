@@ -12,10 +12,10 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.config import Config, ModelSpec
-from src.matrioska.core.events import EventBus
-from src.matrioska.core.state import FileSpec
-from src.matrioska.llm.client import LLMClient
+from matrioska.core.config import Config, ModelSpec
+from matrioska.core.events import EventBus
+from matrioska.core.state import FileSpec
+from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.agents.repairer")
 
@@ -110,12 +110,12 @@ class RepairerAgent:
             elapsed_s=round(elapsed, 2),
         )
 
-        # Extract content from response
-        content = resp.text
+        # Extract content from response, stripping code fences
+        content = _strip_fences(resp.text)
         if resp.tool_calls:
             for tc in resp.tool_calls:
                 if tc.name == "finish":
-                    content = str(tc.arguments.get("content", ""))
+                    content = _strip_fences(str(tc.arguments.get("content", "")))
                     break
 
         logger.info("Repairer produced %d chars for %s", len(content), spec.filename)
@@ -124,3 +124,15 @@ class RepairerAgent:
     def _emit(self, name: str, **data: Any) -> None:
         if self.bus:
             self.bus.emit_named(name, **data)
+
+
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences from model output."""
+    t = text.strip()
+    for fence in ("```python", "```py", "```sql", "```json", "```yaml", "```", "``"):
+        if t.startswith(fence):
+            t = t[len(fence):].strip()
+            if t.endswith("```"):
+                t = t[:-3].strip()
+            break
+    return t

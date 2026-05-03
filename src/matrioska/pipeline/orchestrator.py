@@ -21,21 +21,21 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from src.matrioska.core.config import Config, load_config, validate_config
-from src.matrioska.core.events import (
+from matrioska.core.config import Config, load_config, validate_config
+from matrioska.core.events import (
     EventBus,
     JSONLRecorder,
     TokenTracker,
     MetricsCollector,
 )
-from src.matrioska.core.state import RunState, StateGraph, PipelineStatus
-from src.matrioska.llm.client import LLMClient
-from src.matrioska.memory.episodic import EpisodicMemory
-from src.matrioska.memory.semantic import SemanticMemory
-from src.matrioska.memory.procedural import ProceduralMemory
-from src.matrioska.pipeline.phase1 import run_phase1
-from src.matrioska.pipeline.phase2 import run_phase2
-from src.matrioska.pipeline.phase3 import run_phase3
+from matrioska.core.state import RunState, StateGraph, PipelineStatus
+from matrioska.llm.client import LLMClient
+from matrioska.memory.episodic import EpisodicMemory
+from matrioska.memory.semantic import SemanticMemory
+from matrioska.memory.procedural import ProceduralMemory
+from matrioska.pipeline.phase1 import run_phase1
+from matrioska.pipeline.phase2 import run_phase2
+from matrioska.pipeline.phase3 import run_phase3
 
 logger = logging.getLogger("matrioska.orchestrator")
 

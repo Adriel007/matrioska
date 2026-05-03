@@ -16,11 +16,11 @@ import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.matrioska.core.config import Config, ModelSpec
-from src.matrioska.core.events import EventBus
-from src.matrioska.core.state import FileArtifact, FileSpec
-from src.matrioska.llm.client import LLMClient, STD_TOOLS, ChatResponse
-from src.matrioska.llm.circuit import route_model_for_extension
+from matrioska.core.config import Config, ModelSpec
+from matrioska.core.events import EventBus
+from matrioska.core.state import FileArtifact, FileSpec
+from matrioska.llm.client import LLMClient, STD_TOOLS, ChatResponse
+from matrioska.llm.circuit import route_model_for_extension
 
 logger = logging.getLogger("matrioska.agents.generator")
 
@@ -72,17 +72,32 @@ class GeneratorAgent:
 
         Returns (content, shared_state_updates).
         """
-        spec = self.cfg.effective_generator
+        gen_spec = self.cfg.effective_generator
 
-        # MoE routing: pick model based on file extension
-        model = route_model_for_extension(spec.extension, spec.model)
+        # MoE routing: pick model based on file extension.
+        # Only applies to official OpenAI/Anthropic APIs — third-party
+        # compatible endpoints (NVIDIA, OpenRouter, etc.) use the
+        # configured model directly.
+        is_official = (
+            gen_spec.provider == "anthropic"
+            or (
+                gen_spec.provider == "openai"
+                and gen_spec.base_url
+                and "api.openai.com" in gen_spec.base_url
+            )
+        )
+        model = (
+            route_model_for_extension(spec.extension, gen_spec.model)
+            if is_official
+            else gen_spec.model
+        )
         model_spec = ModelSpec(
-            provider=spec.provider,
+            provider=gen_spec.provider,
             model=model,
-            base_url=spec.base_url,
-            api_key=spec.api_key,
-            temperature=spec.temperature,
-            max_tokens=spec.max_tokens,
+            base_url=gen_spec.base_url,
+            api_key=gen_spec.api_key,
+            temperature=gen_spec.temperature,
+            max_tokens=gen_spec.max_tokens,
         )
 
         system = GENERATOR_SYSTEM_PROMPT.replace("{project_memory_section}", "")
@@ -126,7 +141,7 @@ class GeneratorAgent:
 
             for tc in resp.tool_calls:
                 if tc.name == "finish":
-                    content = str(tc.arguments.get("content", ""))
+                    content = _strip_fences(str(tc.arguments.get("content", "")))
                     raw_updates = tc.arguments.get("shared_state_updates", {})
                     if isinstance(raw_updates, dict):
                         updates = raw_updates
@@ -187,7 +202,7 @@ class GeneratorAgent:
             result2 = f2.result()
 
         # Use Judge to pick
-        from src.matrioska.agents.judge import JudgeAgent
+        from matrioska.agents.judge import JudgeAgent
 
         judge = JudgeAgent(self.cfg, self.llm, bus=self.bus)
         winner = judge.evaluate_files(
@@ -296,17 +311,31 @@ class GeneratorAgent:
             self.bus.emit_named(name, **data)
 
 
+def _strip_fences(text: str) -> str:
+    """Strip markdown code fences from model output."""
+    t = text.strip()
+    for fence in ("```python", "```py", "```sql", "```json", "```yaml", "```", "``"):
+        if t.startswith(fence):
+            t = t[len(fence):].strip()
+            if t.endswith("```"):
+                t = t[:-3].strip()
+            break
+    return t
+
+
 def _extract_from_text(text: str) -> Tuple[str, Dict[str, Any]]:
     """Extract content and shared_state updates from plain-text response."""
     if not text:
         return "", {}
 
-    idx = text.find(SHARED_STATE_MARKER)
-    if idx < 0:
-        return text.strip(), {}
+    cleaned = _strip_fences(text)
 
-    content = text[:idx].strip()
-    tail = text[idx + len(SHARED_STATE_MARKER) :].strip()
+    idx = cleaned.find(SHARED_STATE_MARKER)
+    if idx < 0:
+        return cleaned, {}
+
+    content = cleaned[:idx].strip()
+    tail = cleaned[idx + len(SHARED_STATE_MARKER) :].strip()
 
     updates: Dict[str, Any] = {}
     try:

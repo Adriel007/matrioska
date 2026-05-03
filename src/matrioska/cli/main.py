@@ -165,8 +165,8 @@ def _build_cli_overrides(ns: argparse.Namespace) -> Dict[str, Any]:
 
 
 def _cmd_run(ns: argparse.Namespace) -> int:
-    from src.matrioska.core.config import load_config, validate_config
-    from src.matrioska.pipeline.orchestrator import Matrioska
+    from matrioska.core.config import load_config, validate_config
+    from matrioska.pipeline.orchestrator import Matrioska
 
     overrides = _build_cli_overrides(ns)
     cfg = load_config(overrides)
@@ -191,8 +191,8 @@ def _cmd_run(ns: argparse.Namespace) -> int:
 
 
 def _cmd_resume(ns: argparse.Namespace) -> int:
-    from src.matrioska.core.config import load_config, validate_config
-    from src.matrioska.pipeline.orchestrator import Matrioska
+    from matrioska.core.config import load_config, validate_config
+    from matrioska.pipeline.orchestrator import Matrioska
 
     overrides = _build_cli_overrides(ns)
     cfg = load_config(overrides)
@@ -203,8 +203,8 @@ def _cmd_resume(ns: argparse.Namespace) -> int:
 
 
 def _cmd_show(ns: argparse.Namespace) -> int:
-    from src.matrioska.pipeline.orchestrator import Matrioska
-    from src.matrioska.core.config import Config
+    from matrioska.pipeline.orchestrator import Matrioska
+    from matrioska.core.config import Config
 
     work_dir = getattr(ns, "work_dir", None) or Path("./matrioska_work")
     cfg = Config(work_dir=work_dir)
@@ -234,7 +234,7 @@ def _cmd_clean(ns: argparse.Namespace) -> int:
 def _cmd_serve(ns: argparse.Namespace) -> int:
     """Start the Matrioska MCP server."""
     try:
-        from src.matrioska.api import create_mcp_server
+        from matrioska.api import create_mcp_server
         import asyncio
 
         print(f"Matrioska MCP server starting on port {ns.port}...")
@@ -249,9 +249,9 @@ def _cmd_serve(ns: argparse.Namespace) -> int:
 
 def _cmd_eval(ns: argparse.Namespace) -> int:
     """Run golden regression suite."""
-    from src.matrioska.eval.golden_suite import get_golden_tasks, evaluate_result
-    from src.matrioska.core.config import load_config, validate_config
-    from src.matrioska.pipeline.orchestrator import Matrioska
+    from matrioska.eval.golden_suite import get_golden_tasks, evaluate_result
+    from matrioska.core.config import load_config, validate_config
+    from matrioska.pipeline.orchestrator import Matrioska
 
     overrides = _build_cli_overrides(ns)
     cfg = load_config(overrides)

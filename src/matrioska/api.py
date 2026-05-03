@@ -13,8 +13,8 @@ import json
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.config import Config, load_config, validate_config
-from src.matrioska.pipeline.orchestrator import Matrioska, run
+from matrioska.core.config import Config, load_config, validate_config
+from matrioska.pipeline.orchestrator import Matrioska, run
 
 logger = logging.getLogger("matrioska.api")
 

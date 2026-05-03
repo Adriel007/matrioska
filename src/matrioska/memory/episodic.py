@@ -18,7 +18,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.matrioska.core.state import Architecture, FileArtifact
+from matrioska.core.state import Architecture, FileArtifact
 
 logger = logging.getLogger("matrioska.memory.episodic")
 

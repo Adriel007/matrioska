@@ -48,10 +48,9 @@ src/matrioska/
 
 ```bash
 # Install
-cd v3
 pip install -e ".[all]"
 
-# Set up your provider
+# Set up your provider (create a .env from .env.example)
 export MATRIOSKA_PROVIDER=openai
 export MATRIOSKA_BASE_URL=https://api.openai.com/v1
 export MATRIOSKA_API_KEY=sk-...
@@ -81,6 +80,12 @@ matrioska eval --category cli
 matrioska run --provider anthropic --api-key sk-ant-... \
     --model claude-sonnet-4 --architect-model claude-opus-4 \
     --task "Create a Python CLI todo app"
+
+# Groq (fast inference)
+export MATRIOSKA_BASE_URL=https://api.groq.com/openai/v1
+export MATRIOSKA_API_KEY=gsk-...
+export MATRIOSKA_MODEL=llama-3.3-70b-versatile
+matrioska run --task "Create a Python CLI todo app with SQLite"
 
 # OpenRouter (multi-provider gateway)
 matrioska run --base-url https://openrouter.ai/api/v1 --api-key sk-or-... \
@@ -129,6 +134,12 @@ for a in result["artifacts"]:
 - Optional Docker sandbox execution with captured stdout/stderr
 - On failure: replan (returns to Phase 1 or 2 with error context)
 
+> **Note:** During Phase 2, contract violations are non-blocking (warnings only).
+> The authoritative contract check runs in Phase 3. This prevents generators
+> from stalling on missing `shared_state_updates` — keys declared in
+> `shared_state_writes` are auto-populated with placeholders so downstream
+> files can reference them.
+
 ## Core Concepts
 
 ### Typed Shared State Contracts
@@ -161,6 +172,10 @@ contract = FileContract(
 | Validator | gpt-4o-mini / claude-haiku-4.5 | Cheap and fast |
 | Judge | gpt-4o / claude-sonnet-4 | Analytical precision |
 | Repairer | (same as Generator) | Focused on debugging |
+
+MoE routing (`.py → claude-sonnet-4`, `.sql → gpt-4o`, etc.) only applies to
+official OpenAI/Anthropic APIs. Third-party providers (Groq, NVIDIA, Ollama)
+use the configured model directly — set `MATRIOSKA_<ROLE>_MODEL` explicitly.
 
 Override per role:
 ```bash

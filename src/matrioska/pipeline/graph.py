@@ -9,7 +9,7 @@ from __future__ import annotations
 
 from typing import Dict, List, Set
 
-from src.matrioska.core.state import FileSpec
+from matrioska.core.state import FileSpec
 
 
 def compute_layers(files: List[FileSpec]) -> List[List[FileSpec]]:

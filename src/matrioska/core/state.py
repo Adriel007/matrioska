@@ -20,7 +20,7 @@ from enum import Enum
 from pathlib import Path
 from typing import Any, Dict, List, Optional, Literal
 
-from src.matrioska.core.contracts import FileContract
+from matrioska.core.contracts import FileContract
 
 # ── Data types ───────────────────────────────────────────────────────────────
 
@@ -52,7 +52,7 @@ class Architecture:
 
     def to_contracts(self) -> List[FileContract]:
         """Convert FileSpecs to typed FileContracts for validation."""
-        from src.matrioska.core.contracts import SharedStateSchema, StateKeyType
+        from matrioska.core.contracts import SharedStateSchema, StateKeyType
 
         contracts: List[FileContract] = []
         for f in self.files:

@@ -15,9 +15,9 @@ import uuid
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.matrioska.core.config import Config, ModelSpec
-from src.matrioska.core.events import EventBus
-from src.matrioska.llm.circuit import ProviderRouter
+from matrioska.core.config import Config, ModelSpec
+from matrioska.core.events import EventBus
+from matrioska.llm.circuit import ProviderRouter
 
 logger = logging.getLogger("matrioska.llm")
 
@@ -127,14 +127,10 @@ class LLMClient:
     ) -> ChatResponse:
         """Dispatch a chat request with circuit breaker protection.
 
-        Args:
-            messages: List of role/content messages.
-            model_spec: Optional per-role model spec; falls back to config defaults.
-            json_mode: Force JSON response.
-            json_schema: Optional JSON Schema for structured output.
-            tools: Optional tool definitions for tool use.
-            system: Optional system message.
+        Auto-retries on 429 (rate limit) with exponential backoff + jitter.
         """
+        import random
+
         spec = model_spec or ModelSpec(
             provider=self.cfg.provider,
             model=self.cfg.model,
@@ -152,47 +148,64 @@ class LLMClient:
             raise RuntimeError("All providers are unavailable (circuits open).")
 
         start_time = time.time()
-        try:
-            if provider == "hf":
-                resp = self._hf_chat(messages, json_mode, spec)
-            elif provider == "ollama":
-                resp = self._ollama_chat(messages, json_mode, spec)
-            elif provider == "anthropic":
-                resp = self._anthropic_chat(
-                    messages, json_mode, json_schema, tools, spec
+        last_error: Optional[Exception] = None
+
+        for attempt in range(4):  # initial + 3 retries
+            try:
+                if provider == "hf":
+                    resp = self._hf_chat(messages, json_mode, spec)
+                elif provider == "ollama":
+                    resp = self._ollama_chat(messages, json_mode, spec)
+                elif provider == "anthropic":
+                    resp = self._anthropic_chat(
+                        messages, json_mode, json_schema, tools, spec
+                    )
+                else:
+                    resp = self._openai_compatible_chat(
+                        messages,
+                        json_mode,
+                        json_schema,
+                        tools,
+                        provider,
+                        spec,
+                    )
+
+                resp.provider = provider
+                resp.model = spec.model
+
+                self._router.mark_success(provider)
+                self._emit(
+                    "llm_done",
+                    provider=provider,
+                    model=spec.model,
+                    prompt_tokens=resp.prompt_tokens,
+                    completion_tokens=resp.completion_tokens,
+                    elapsed_s=round(time.time() - start_time, 2),
                 )
-            else:
-                resp = self._openai_compatible_chat(
-                    messages,
-                    json_mode,
-                    json_schema,
-                    tools,
-                    provider,
-                    spec,
-                )
+                return resp
 
-            resp.provider = provider
-            resp.model = spec.model
+            except _RetriableError as e:
+                last_error = e
+                is_429 = "429" in str(e)
+                if is_429 and attempt < 3:
+                    delay = (2 ** (attempt + 1)) + random.random() * 2
+                    logger.warning(
+                        "Rate limited (attempt %d/3), retrying in %.1fs...",
+                        attempt + 1,
+                        delay,
+                    )
+                    time.sleep(delay)
+                    continue
+                self._router.mark_failure(provider)
+                self._emit("llm_retriable_error", provider=provider, error=str(e))
+                raise RuntimeError(f"LLM call failed ({provider}): {e}") from e
 
-            self._router.mark_success(provider)
-            self._emit(
-                "llm_done",
-                provider=provider,
-                model=spec.model,
-                prompt_tokens=resp.prompt_tokens,
-                completion_tokens=resp.completion_tokens,
-                elapsed_s=round(time.time() - start_time, 2),
-            )
-            return resp
+            except Exception as e:
+                self._router.mark_failure(provider)
+                self._emit("llm_fatal_error", provider=provider, error=str(e))
+                raise
 
-        except _RetriableError as e:
-            self._router.mark_failure(provider)
-            self._emit("llm_retriable_error", provider=provider, error=str(e))
-            raise RuntimeError(f"LLM call failed ({provider}): {e}") from e
-        except Exception as e:
-            self._router.mark_failure(provider)
-            self._emit("llm_fatal_error", provider=provider, error=str(e))
-            raise
+        raise RuntimeError(f"LLM call failed ({provider}): {last_error}") from last_error
 
     # ── Provider implementations ─────────────────────────────────────────
 

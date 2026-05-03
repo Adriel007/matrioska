@@ -14,7 +14,7 @@ import tempfile
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.state import RunState
+from matrioska.core.state import RunState
 
 logger = logging.getLogger("matrioska.tools.sandbox")
 

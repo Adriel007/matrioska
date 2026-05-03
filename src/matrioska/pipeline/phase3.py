@@ -13,10 +13,10 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.config import Config
-from src.matrioska.core.contracts import ContractValidator, ContractValidationResult
-from src.matrioska.core.events import EventBus, MetricsCollector
-from src.matrioska.core.state import RunState, PipelineStatus
+from matrioska.core.config import Config
+from matrioska.core.contracts import ContractValidator, ContractValidationResult
+from matrioska.core.events import EventBus, MetricsCollector
+from matrioska.core.state import RunState, PipelineStatus
 
 logger = logging.getLogger("matrioska.pipeline.phase3")
 
@@ -140,7 +140,7 @@ def _run_sandbox(state: RunState, cfg: Config) -> Dict[str, Any]:
 
     # Scaffold: in full implementation, spin up Docker container and run
     try:
-        from src.matrioska.tools.sandbox import SandboxExecutor
+        from matrioska.tools.sandbox import SandboxExecutor
 
         executor = SandboxExecutor(
             image=cfg.sandbox_image,

@@ -15,14 +15,14 @@ from dataclasses import dataclass, field
 from html.parser import HTMLParser
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.config import Config, ModelSpec
-from src.matrioska.core.contracts import (
+from matrioska.core.config import Config, ModelSpec
+from matrioska.core.contracts import (
     FileContract,
     ContractValidator,
     ContractValidationResult,
 )
-from src.matrioska.core.events import EventBus
-from src.matrioska.llm.client import LLMClient
+from matrioska.core.events import EventBus
+from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.agents.validator")
 
@@ -84,7 +84,7 @@ class ValidatorAgent:
         syntax = self._check_syntax(content, extension)
         if not syntax.ok:
             result.syntax_ok = False
-            result.syntax_error = syntax.error
+            result.syntax_error = syntax.syntax_error
             result.ok = False
 
         # 2. Content quality heuristics
@@ -98,13 +98,13 @@ class ValidatorAgent:
             result.syntax_error = "empty content"
             result.ok = False
 
-        # 3. Contract validation
+        # 3. Contract validation (warnings only — full validation in Phase 3)
         if contract is not None and shared_state is not None:
             cr = ContractValidator.validate_writes(contract, shared_state)
             if not cr.ok:
                 result.contract_ok = False
                 result.contract_violations = cr.violations
-                result.ok = False
+                result.semantic_warnings.extend(cr.violations)
             result.semantic_warnings.extend(cr.warnings)
 
         # 4. LLM semantic review (optional, for complex files)
@@ -120,6 +120,10 @@ class ValidatorAgent:
         )
 
         return result
+
+    def _emit(self, name: str, **data: Any) -> None:
+        if self.bus:
+            self.bus.emit_named(name, **data)
 
     # ── Syntactic validation ─────────────────────────────────────────────
 

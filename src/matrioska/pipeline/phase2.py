@@ -16,21 +16,21 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.config import Config
-from src.matrioska.core.events import EventBus
-from src.matrioska.core.state import (
+from matrioska.core.config import Config
+from matrioska.core.events import EventBus
+from matrioska.core.state import (
     Architecture,
     FileArtifact,
     FileSpec,
     RunState,
     PipelineStatus,
 )
-from src.matrioska.agents.generator import GeneratorAgent
-from src.matrioska.agents.validator import ValidatorAgent
-from src.matrioska.agents.repairer import RepairerAgent
-from src.matrioska.agents.reflector import ReflectorAgent
-from src.matrioska.llm.client import LLMClient
-from src.matrioska.pipeline.graph import compute_layers
+from matrioska.agents.generator import GeneratorAgent
+from matrioska.agents.validator import ValidatorAgent
+from matrioska.agents.repairer import RepairerAgent
+from matrioska.agents.reflector import ReflectorAgent
+from matrioska.llm.client import LLMClient
+from matrioska.pipeline.graph import compute_layers
 
 logger = logging.getLogger("matrioska.pipeline.phase2")
 
@@ -182,6 +182,12 @@ def _generate_file(
         )
 
         if result.ok:
+            # Auto-populate shared_state from declared writes so downstream
+            # files can reference them even if the generator didn't emit
+            # explicit shared_state_updates via the finish tool.
+            for k in spec.shared_state_writes:
+                if k not in state.shared_state:
+                    state.shared_state[k] = updates.get(k, f"__auto__{k}__")
             state.update_shared_state(updates)
             state.log(
                 f"Generated {spec.filename} (attempt {attempt + 1}, "
@@ -251,7 +257,7 @@ def _nested_generate(
     depth: int,
 ) -> FileArtifact:
     """Handle complex files via recursive Matrioska invocation."""
-    from src.matrioska.pipeline.orchestrator import Matrioska
+    from matrioska.pipeline.orchestrator import Matrioska
 
     sub_cfg = Config(**{k: v for k, v in vars(cfg).items()})
     sub_cfg.work_dir = cfg.work_dir / "matrioska_artifacts" / f"{spec.name}.nested"

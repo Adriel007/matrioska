@@ -13,12 +13,12 @@ import time
 from dataclasses import dataclass, field
 from typing import Any, Dict, List, Optional, Tuple
 
-from src.matrioska.core.config import Config, ModelSpec
-from src.matrioska.core.events import EventBus
-from src.matrioska.core.state import Architecture, FileSpec
-from src.matrioska.llm.client import LLMClient
-from src.matrioska.memory.episodic import EpisodicMemory, RunNote
-from src.matrioska.memory.procedural import ProceduralMemory
+from matrioska.core.config import Config, ModelSpec
+from matrioska.core.events import EventBus
+from matrioska.core.state import Architecture, FileSpec
+from matrioska.llm.client import LLMClient
+from matrioska.memory.episodic import EpisodicMemory, RunNote
+from matrioska.memory.procedural import ProceduralMemory
 
 logger = logging.getLogger("matrioska.agents.architect")
 
@@ -262,7 +262,7 @@ class ArchitectAgent:
             return candidates[0]
 
         # Judge evaluates each candidate
-        from src.matrioska.agents.judge import JudgeAgent
+        from matrioska.agents.judge import JudgeAgent
 
         judge = JudgeAgent(self.cfg, self.llm, bus=self.bus)
 

@@ -17,10 +17,10 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from src.matrioska.core.config import Config
-from src.matrioska.core.events import EventBus
-from src.matrioska.core.state import FileArtifact, FileSpec
-from src.matrioska.llm.client import LLMClient
+from matrioska.core.config import Config
+from matrioska.core.events import EventBus
+from matrioska.core.state import FileArtifact, FileSpec
+from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.agents.reflector")
 

@@ -10,13 +10,13 @@ from __future__ import annotations
 import logging
 from typing import Optional
 
-from src.matrioska.core.config import Config
-from src.matrioska.core.events import EventBus
-from src.matrioska.core.state import Architecture, RunState, PipelineStatus
-from src.matrioska.agents.architect import ArchitectAgent
-from src.matrioska.llm.client import LLMClient
-from src.matrioska.memory.episodic import EpisodicMemory
-from src.matrioska.memory.procedural import ProceduralMemory
+from matrioska.core.config import Config
+from matrioska.core.events import EventBus
+from matrioska.core.state import Architecture, RunState, PipelineStatus
+from matrioska.agents.architect import ArchitectAgent
+from matrioska.llm.client import LLMClient
+from matrioska.memory.episodic import EpisodicMemory
+from matrioska.memory.procedural import ProceduralMemory
 
 logger = logging.getLogger("matrioska.pipeline.phase1")
 
