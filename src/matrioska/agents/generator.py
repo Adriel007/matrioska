@@ -19,6 +19,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from matrioska.core.config import Config, ModelSpec
 from matrioska.core.events import EventBus
 from matrioska.core.state import FileArtifact, FileSpec
+from matrioska.core.text_utils import strip_fences
 from matrioska.llm.client import LLMClient, STD_TOOLS, ChatResponse
 from matrioska.llm.circuit import route_model_for_extension
 
@@ -39,7 +40,16 @@ emit the raw file content followed by:
     SHARED_STATE_UPDATE:
     { "key1": "value1", "key2": ["item1", "item2"] }
 
-Only include SHARED_STATE_UPDATE if you define keys other files need.
+SHARED STATE (shared_state_updates): CRITICAL — you MUST emit every key you were
+assigned to write (check WRITES below). Downstream files depend on these keys.
+Examples of what to emit:
+  - Class names you defined: {{"models": ["Book", "Author"], "schemas": ["BookCreate", "BookResponse"]}}
+  - API endpoints: {{"routes": ["GET /books", "POST /books", "GET /books/{id}"]}}
+  - Database schema: {{"db_schema": "books(id INTEGER, title TEXT, author TEXT)"}}
+  - CLI interface: {{"subcommands": ["add", "list", "done", "delete"], "entrypoint": "todo.py"}}
+  - Config values: {{"port": 8000, "db_url": "postgresql://db:5432/app"}}
+  - File paths to import: {{"modules": ["models.py", "database.py", "routes.py"]}}
+Emit keys that answer "what would a downstream file need to know to use this file?"
 
 {project_memory_section}
 """
@@ -100,15 +110,33 @@ class GeneratorAgent:
             max_tokens=gen_spec.max_tokens,
         )
 
-        system = GENERATOR_SYSTEM_PROMPT.replace("{project_memory_section}", "")
+        proj_mem = ""
+        try:
+            from matrioska.memory.procedural import ProceduralMemory
+            pm = ProceduralMemory(self.cfg.work_dir)
+            mem_text = pm.read_project_memory()
+            if mem_text:
+                proj_mem = f"\nPROJECT MEMORY:\n{mem_text}\n"
+        except Exception:
+            pass
+        system = GENERATOR_SYSTEM_PROMPT.replace("{project_memory_section}", proj_mem)
 
         if self.cfg.enable_debate and (
             spec.complex or previous_error  # debate when complex or retrying
         ):
             return self._debate_generate(spec, shared_context, model_spec, system)
 
+        # Enable tools for OpenAI-compat providers (Groq, OpenRouter, NVIDIA, etc.)
+        # The client auto-falls back if tools are rejected (HTTP 400).
+        gen_spec_for_tools = model_spec  # noqa: alias for clarity
+        use_native_tools = gen_spec_for_tools.provider in ("openai", "anthropic") or (
+            gen_spec_for_tools.base_url
+            and "api.openai.com" not in gen_spec_for_tools.base_url
+            and gen_spec_for_tools.provider == "openai"
+        )
         return self._single_generate(
-            spec, shared_context, model_spec, system, previous_error
+            spec, shared_context, model_spec, system, previous_error,
+            force_tools=use_native_tools,
         )
 
     # ── Single generation ────────────────────────────────────────────────
@@ -120,11 +148,12 @@ class GeneratorAgent:
         model_spec: ModelSpec,
         system: str,
         error_hint: str = "",
+        force_tools: bool = True,
     ) -> Tuple[str, Dict[str, Any]]:
         """Run a single generator agent loop with tool use."""
         user_prompt = self._build_user_prompt(spec, shared_context, error_hint)
         messages: List[Dict[str, Any]] = [{"role": "user", "content": user_prompt}]
-        use_tools = model_spec.provider in ("openai", "anthropic")
+        use_tools = force_tools
 
         content = ""
         updates: Dict[str, Any] = {}
@@ -141,7 +170,7 @@ class GeneratorAgent:
 
             for tc in resp.tool_calls:
                 if tc.name == "finish":
-                    content = _strip_fences(str(tc.arguments.get("content", "")))
+                    content = strip_fences(str(tc.arguments.get("content", "")))
                     raw_updates = tc.arguments.get("shared_state_updates", {})
                     if isinstance(raw_updates, dict):
                         updates = raw_updates
@@ -228,11 +257,22 @@ class GeneratorAgent:
             )
             context_block = f"\n\nAVAILABLE SHARED STATE (from earlier files):\n{items}"
 
+        # Tell the generator exactly what shared_state keys it must emit
+        writes_block = ""
+        if spec.shared_state_writes:
+            writes_block = (
+                f"\n\nSHARED STATE YOU MUST EMIT (keys downstream files depend on):\n"
+                + "\n".join(f"  - {k}" for k in spec.shared_state_writes)
+                + "\n\nDescribe these concretely in shared_state_updates "
+                + "(e.g., class names, routes, DB schemas, config values, module names)."
+            )
+
         prompt = (
             f"FILE: {spec.name}.{spec.extension}\n\n"
             f"GENERATION INSTRUCTIONS:\n{spec.content}{context_block}\n\n"
-            f"REQUIREMENTS:\n{spec.details}\n\n"
-            f"Emit the COMPLETE file. Use the `finish` tool if available."
+            f"REQUIREMENTS:\n{spec.details}"
+            f"{writes_block}\n\n"
+            f"Emit the COMPLETE file via `finish` tool."
         )
 
         if error_hint:
@@ -311,24 +351,13 @@ class GeneratorAgent:
             self.bus.emit_named(name, **data)
 
 
-def _strip_fences(text: str) -> str:
-    """Strip markdown code fences from model output."""
-    t = text.strip()
-    for fence in ("```python", "```py", "```sql", "```json", "```yaml", "```", "``"):
-        if t.startswith(fence):
-            t = t[len(fence):].strip()
-            if t.endswith("```"):
-                t = t[:-3].strip()
-            break
-    return t
-
 
 def _extract_from_text(text: str) -> Tuple[str, Dict[str, Any]]:
     """Extract content and shared_state updates from plain-text response."""
     if not text:
         return "", {}
 
-    cleaned = _strip_fences(text)
+    cleaned = strip_fences(text)
 
     idx = cleaned.find(SHARED_STATE_MARKER)
     if idx < 0:

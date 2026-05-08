@@ -1,0 +1,10 @@
+{
+  "id": "cli_todo",
+  "category": "cli",
+  "expected_file_count": [1, 3],
+  "expected_extensions": ["py"],
+  "min_shared_state_keys": 2,
+  "source_files": ["todo.py"],
+  "complexity": "simple",
+  "tags": ["python", "cli", "json", "crud"]
+}

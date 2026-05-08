@@ -1,0 +1,6 @@
+API_PREFIX = "/api"
+ENDPOINTS = ["GET /api/todos", "GET /api/todos/{id}", "POST /api/todos", "PUT /api/todos/{id}", "DELETE /api/todos/{id}"]
+TODO_SCHEMA = {"id": "int", "title": "str", "done": "bool", "created_at": "str"}
+DB_URL = "sqlite:///./todos.db"
+STATIC_DIR = "./static"
+ENTRYPOINT = "main.py"

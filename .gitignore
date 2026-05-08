@@ -9,3 +9,7 @@ __pycache__/
 
 # Generated artifacts and checkpoints from pipeline runs
 matrioska_work/
+
+# Benchmark run artifacts (generated code, tmp conftest, error logs)
+benchmarks/results/poc/work/
+benchmarks/results/**/.matrioska_error.txt

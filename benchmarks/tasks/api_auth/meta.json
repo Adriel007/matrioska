@@ -1,0 +1,10 @@
+{
+  "id": "api_auth",
+  "category": "api",
+  "expected_file_count": [4, 8],
+  "expected_extensions": ["py", "txt"],
+  "min_shared_state_keys": 7,
+  "source_files": ["main.py", "models.py", "auth.py", "middleware.py", "routes.py"],
+  "complexity": "complex",
+  "tags": ["python", "fastapi", "jwt", "auth", "multi-file"]
+}

@@ -1,0 +1,3 @@
+STATS_SCRIPT = "stats.py"
+OUTPUT_FORMAT = "text"
+NUMERIC_STATS = ["count", "mean", "median", "std", "min", "max", "p25", "p75"]

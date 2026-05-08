@@ -1,0 +1,10 @@
+{
+  "id": "api_books",
+  "category": "api",
+  "expected_file_count": [1, 4],
+  "expected_extensions": ["py"],
+  "min_shared_state_keys": 2,
+  "source_files": ["main.py"],
+  "complexity": "medium",
+  "tags": ["python", "fastapi", "rest", "crud"]
+}

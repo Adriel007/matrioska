@@ -76,6 +76,8 @@ class Config:
     # ── Phase 2: Generation ───────────────────────────────────────────────
     enable_reflexion: bool = True       # Enable Reflexion loop
     enable_debate: bool = False         # Multi-agent debate for complex files
+    enable_test_design: bool = True     # AlphaCodium+AgentCoder: design tests before generating
+    use_aci_repair: bool = True         # SWE-agent ACI: targeted patch repair vs full-file rewrite
 
     # ── Phase 3: Verification ─────────────────────────────────────────────
     enable_sandbox: bool = False        # Docker sandbox execution
@@ -152,6 +154,7 @@ class Config:
 _BOOL_FLAGS = {
     "parallel", "plan_only", "thinking", "dry_run", "interactive",
     "enable_tot", "enable_reflexion", "enable_debate",
+    "enable_test_design", "use_aci_repair",
     "enable_sandbox", "enable_graphrag", "enable_otel", "enable_cost_tracking",
 }
 _INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",

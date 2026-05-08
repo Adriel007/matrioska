@@ -198,7 +198,17 @@ class LLMClient:
                     continue
                 self._router.mark_failure(provider)
                 self._emit("llm_retriable_error", provider=provider, error=str(e))
-                raise RuntimeError(f"LLM call failed ({provider}): {e}") from e
+                msg = str(e)
+                hint = ""
+                if "401" in msg or "unauthorized" in msg:
+                    hint = " → Check MATRIOSKA_API_KEY in .env"
+                elif "404" in msg or "not found" in msg:
+                    hint = f" → Check MATRIOSKA_MODEL (current: {spec.model})"
+                elif "connection" in msg.lower() or "refused" in msg.lower():
+                    hint = f" → Check MATRIOSKA_BASE_URL ({spec.base_url})"
+                elif "429" in msg or "rate limit" in msg.lower():
+                    hint = " → Wait for rate limit reset or switch provider"
+                raise RuntimeError(f"LLM call failed ({provider}/{spec.model}): {e}{hint}") from e
 
             except Exception as e:
                 self._router.mark_failure(provider)
@@ -254,6 +264,19 @@ class LLMClient:
 
         if r.status_code in (408, 425, 429, 500, 502, 503, 504):
             raise _RetriableError(f"HTTP {r.status_code}: {r.text[:200]}")
+
+        if r.status_code == 401:
+            raise _RetriableError(
+                f"Authentication failed (401). Check your API key:\n"
+                f"  Set MATRIOSKA_API_KEY in .env or pass --api-key.\n"
+                f"  Provider: {provider} | Model: {spec.model}"
+            )
+        if r.status_code == 404:
+            raise _RetriableError(
+                f"Model not found (404): '{spec.model}' on {provider}.\n"
+                f"  Check MATRIOSKA_MODEL in .env or pass --model.\n"
+                f"  Verify the model name is correct for this provider."
+            )
 
         if r.status_code == 400 and json_schema:
             logger.info("json_schema rejected; falling back to json_object")

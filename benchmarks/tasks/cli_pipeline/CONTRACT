@@ -1,0 +1,5 @@
+MODULES = ["config.py", "extract.py", "transform.py", "load.py", "pipeline.py"]
+CONFIG_FIELDS = ["input_file", "output_file", "columns", "filters", "batch_size"]
+FUNCTIONS = {"extract.py": ["extract"], "transform.py": ["transform"], "load.py": ["load"]}
+PIPELINE_FLOW = "extract -> transform -> load"
+ENTRYPOINT = "pipeline.py"

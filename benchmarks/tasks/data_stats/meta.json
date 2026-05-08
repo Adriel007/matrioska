@@ -1,0 +1,10 @@
+{
+  "id": "data_stats",
+  "category": "data",
+  "expected_file_count": [1, 3],
+  "expected_extensions": ["py"],
+  "min_shared_state_keys": 3,
+  "source_files": ["stats.py"],
+  "complexity": "simple",
+  "tags": ["python", "csv", "statistics", "cli"]
+}

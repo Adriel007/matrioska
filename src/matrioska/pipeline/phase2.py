@@ -29,6 +29,7 @@ from matrioska.agents.generator import GeneratorAgent
 from matrioska.agents.validator import ValidatorAgent
 from matrioska.agents.repairer import RepairerAgent
 from matrioska.agents.reflector import ReflectorAgent
+from matrioska.agents.test_designer import TestDesignerAgent, run_tests_inline
 from matrioska.llm.client import LLMClient
 from matrioska.pipeline.graph import compute_layers
 
@@ -61,6 +62,7 @@ def run_phase2(
     validator = ValidatorAgent(cfg, bus=bus)
     repairer = RepairerAgent(cfg, llm, bus=bus)
     reflector = ReflectorAgent(cfg, llm, bus=bus) if cfg.enable_reflexion else None
+    test_designer = TestDesignerAgent(cfg, llm, bus=bus) if cfg.enable_test_design else None
 
     for layer_idx, layer in enumerate(layers, 1):
         logger.info(
@@ -69,6 +71,9 @@ def run_phase2(
             len(layers),
             [f"{f.name}.{f.extension}" for f in layer],
         )
+
+        rate_limit_hits = 0
+        total_files = len(layer)
 
         if cfg.parallel and len(layer) > 1:
             with ThreadPoolExecutor(max_workers=min(len(layer), 6)) as pool:
@@ -83,6 +88,7 @@ def run_phase2(
                         validator,
                         repairer,
                         reflector,
+                        test_designer,
                         bus,
                         depth,
                     ): f
@@ -90,7 +96,9 @@ def run_phase2(
                 }
                 for fut in as_completed(futures):
                     artifact = fut.result()
-                    state.add_artifact(artifact)
+                    _finalize_artifact(artifact, state, futures[fut])
+                    if artifact.status == "failed" and "rate limit" in artifact.content.lower():
+                        rate_limit_hits += 1
         else:
             for f in layer:
                 artifact = _generate_file(
@@ -102,10 +110,29 @@ def run_phase2(
                     validator,
                     repairer,
                     reflector,
+                    test_designer,
                     bus,
                     depth,
                 )
-                state.add_artifact(artifact)
+                _finalize_artifact(artifact, state, f)
+                if artifact.status == "failed" and "rate limit" in artifact.content.lower():
+                    rate_limit_hits += 1
+
+        # Layer-level retry: if all files failed due to rate limits, retry layer
+        if rate_limit_hits == total_files and total_files > 0 and layer_idx < len(layers):
+            import time as _time
+            backoff = min(30, 2 ** layer_idx)
+            logger.warning(
+                "Layer %d: all %d files hit rate limit, retrying layer after %ds…",
+                layer_idx, total_files, backoff,
+            )
+            _time.sleep(backoff)
+            for f in layer:
+                artifact = _generate_file(
+                    f, state, cfg, llm,
+                    generator, validator, repairer, reflector, test_designer, bus, depth,
+                )
+                _finalize_artifact(artifact, state, f)
 
     state.status = PipelineStatus.VERIFYING
     success = all(
@@ -126,6 +153,23 @@ def run_phase2(
     return success
 
 
+def _finalize_artifact(artifact: FileArtifact, state: RunState, spec: FileSpec) -> None:
+    """Add artifact to state and auto-populate shared_state for failed files.
+
+    Non-blocking: even if a file fails, downstream files that depend on its
+    shared_state_writes can still be generated using placeholder values.
+    """
+    state.add_artifact(artifact)
+
+    if artifact.status == "failed":
+        for k in spec.shared_state_writes:
+            if k not in state.shared_state:
+                state.shared_state[k] = f"__auto__{k}__"
+                logger.debug(
+                    "  auto-populated %s (failed artifact placeholder)", k
+                )
+
+
 def _generate_file(
     spec: FileSpec,
     state: RunState,
@@ -135,6 +179,7 @@ def _generate_file(
     validator: ValidatorAgent,
     repairer: RepairerAgent,
     reflector: Optional[ReflectorAgent],
+    test_designer: Optional["TestDesignerAgent"],
     bus: Optional[EventBus],
     depth: int,
 ) -> FileArtifact:
@@ -161,27 +206,61 @@ def _generate_file(
         )
         return _nested_generate(spec, cfg, llm, bus, depth)
 
+    # AlphaCodium + AgentCoder: design tests BEFORE generating (arXiv:2401.08500 + 2312.13010).
+    # Tests derived from the contract (blind to implementation) give the Generator
+    # a concrete interface target and the Repairer executable ground-truth signal.
+    designer_tests = ""
+    if test_designer is not None:
+        designer_tests = test_designer.design_tests(spec, context)
+        if designer_tests:
+            spec.details += (
+                f"\n\nCONTRACT TESTS (your implementation must pass these):\n"
+                f"```python\n{designer_tests}\n```"
+            )
+            logger.info("  AlphaCodium: injected %d chars of tests for %s", len(designer_tests), spec.filename)
+
     content = ""
     updates: Dict[str, Any] = {}
+
+    contract = next((c for c in state.contracts if c.file == spec.filename), None)
+    last_errors: list[str] = []
+    last_test_failures: list[str] = []
 
     for attempt in range(cfg.max_repairs + 1):
         if attempt == 0:
             content, updates = generator.generate(spec, context, state.artifacts)
         else:
-            # Repair mode
-            errors = [f"Attempt {attempt}: validation failed"]
-            content = repairer.repair(spec, content, errors, context)
+            # Repair mode — pass validation errors + test failures (AlphaCodium signal)
+            content = repairer.repair(
+                spec, content, last_errors, context,
+                test_failures=last_test_failures if last_test_failures else None,
+            )
 
         if not content:
+            last_errors = ["(empty response)"]
             continue
 
         # Validate
-        contract = next((c for c in state.contracts if c.file == spec.filename), None)
         result = validator.validate(
             content, spec.extension, contract, state.shared_state
         )
 
         if result.ok:
+            # AlphaCodium: run designer tests inline as smoke check.
+            # Failures become repair signal on the next attempt (capped to 1 test-repair).
+            last_test_failures = []
+            if designer_tests and spec.extension == "py" and attempt < cfg.max_repairs:
+                tests_ok, last_test_failures = _run_designer_tests(
+                    spec.name, content, designer_tests
+                )
+                if not tests_ok:
+                    logger.info(
+                        "  AlphaCodium test smoke check: %d failure(s) in %s — repair",
+                        len(last_test_failures), spec.filename,
+                    )
+                    last_errors = [f"Interface test failed: {f}" for f in last_test_failures]
+                    continue  # trigger repair on next loop iteration
+
             # Auto-populate shared_state from declared writes so downstream
             # files can reference them even if the generator didn't emit
             # explicit shared_state_updates via the finish tool.
@@ -235,6 +314,16 @@ def _generate_file(
             attempt + 1,
             result.syntax_error or result.contract_violations,
         )
+        # Capture actual errors for the repairer
+        last_test_failures = []
+        last_errors = []
+        if result.syntax_error:
+            last_errors.append(f"Syntax error: {result.syntax_error}")
+        if result.contract_violations:
+            if isinstance(result.contract_violations, list):
+                last_errors.extend(str(v) for v in result.contract_violations)
+            else:
+                last_errors.append(f"Contract violation: {result.contract_violations}")
 
     # Exhausted repairs
     logger.error("  X %s FAILED after %d attempts", spec.filename, cfg.max_repairs + 1)
@@ -247,6 +336,25 @@ def _generate_file(
         status="failed",
         repair_count=cfg.max_repairs,
     )
+
+
+def _run_designer_tests(
+    module_name: str,
+    code: str,
+    tests_code: str,
+) -> "tuple[bool, list[str]]":
+    """Write code to a tempdir and run designer tests against it."""
+    import tempfile
+    import os
+
+    try:
+        with tempfile.TemporaryDirectory() as tmpdir:
+            module_path = os.path.join(tmpdir, f"{module_name}.py")
+            with open(module_path, "w", encoding="utf-8") as f:
+                f.write(code)
+            return run_tests_inline(tests_code, tmpdir)
+    except Exception as e:
+        return False, [f"test runner error: {e}"]
 
 
 def _nested_generate(

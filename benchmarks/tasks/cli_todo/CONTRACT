@@ -1,0 +1,2 @@
+TODO_SCHEMA = {"id": "int", "title": "str", "done": "bool", "created_at": "str"}
+TASKS_FILE = "tasks.json"
