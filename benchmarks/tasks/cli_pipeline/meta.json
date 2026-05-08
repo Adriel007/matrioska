@@ -1,0 +1,10 @@
+{
+  "id": "cli_pipeline",
+  "category": "data",
+  "expected_file_count": [4, 8],
+  "expected_extensions": ["py", "json"],
+  "min_shared_state_keys": 5,
+  "source_files": ["config.py", "extract.py", "transform.py", "load.py", "pipeline.py"],
+  "complexity": "complex",
+  "tags": ["python", "etl", "pipeline", "multi-file", "cli"]
+}

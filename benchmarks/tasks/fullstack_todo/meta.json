@@ -1,0 +1,10 @@
+{
+  "id": "fullstack_todo",
+  "category": "fullstack",
+  "expected_file_count": [5, 10],
+  "expected_extensions": ["py", "html", "js", "txt"],
+  "min_shared_state_keys": 6,
+  "source_files": ["main.py", "models.py", "database.py", "routes.py", "static/index.html", "static/app.js"],
+  "complexity": "complex",
+  "tags": ["fullstack", "fastapi", "sqlite", "javascript", "multi-file"]
+}

@@ -21,7 +21,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, Optional
 
-from matrioska.core.config import Config, load_config, validate_config
+from matrioska.core.config import Config, ModelSpec, load_config, validate_config
 from matrioska.core.events import (
     EventBus,
     JSONLRecorder,
@@ -68,9 +68,14 @@ class Matrioska:
         # ── Persistence ──────────────────────────────────────────────────
         self.graph = StateGraph(self.work_dir)
 
-        # ── Memory system ────────────────────────────────────────────────
+        # ── Memory system ─────────────────────────────────────────────────
+        # Each tier is optional: failures are logged but never crash the pipeline.
         self.episodic = EpisodicMemory(self.work_dir)
-        self.semantic = SemanticMemory(self.work_dir)
+        try:
+            self.semantic = SemanticMemory(self.work_dir)
+        except Exception as e:
+            logger.warning("SemanticMemory unavailable (chromadb/ONNX?): %s", e)
+            self.semantic = None  # type: ignore
         self.procedural = ProceduralMemory(self.work_dir)
         self.procedural.ensure_project_memory()
 
@@ -102,6 +107,10 @@ class Matrioska:
             provider=self.cfg.provider,
             model=self.cfg.model,
         )
+
+        # ── Connectivity check ──────────────────────────────────────────
+        if not self.cfg.dry_run and self.cfg.provider in ("openai", "anthropic"):
+            self._check_connectivity()
 
         # ── Phase 1: Architecture ──────────────────────────────────────
         state = self.graph.new_run(task)
@@ -215,6 +224,72 @@ class Matrioska:
             logger.info("Removed %s", self.work_dir)
 
     # ── Internals ───────────────────────────────────────────────────────
+
+    def _check_connectivity(self) -> None:
+        """Probe the provider endpoint before running the pipeline.
+
+        Catches invalid API keys, bad base URLs, and unavailable models early
+        with actionable error messages before tokens are spent on architecture.
+        """
+        models = [
+            self.cfg.effective_architect,
+            self.cfg.effective_generator,
+            self.cfg.effective_validator,
+            self.cfg.effective_judge,
+            self.cfg.effective_repairer,
+        ]
+        tested = set()
+
+        for spec in models:
+            key = (spec.provider, spec.base_url, spec.model)
+            if key in tested:
+                continue
+            tested.add(key)
+
+            try:
+                probe_spec = ModelSpec(
+                    provider=spec.provider,
+                    model=spec.model,
+                    base_url=spec.base_url,
+                    api_key=spec.api_key,
+                    max_tokens=5,
+                    temperature=0.0,
+                )
+                self.llm.chat(
+                    messages=[{"role": "user", "content": "OK"}],
+                    model_spec=probe_spec,
+                    system="Reply with exactly: OK",
+                )
+            except Exception as e:
+                msg = str(e).lower()
+                if "401" in msg or "unauthorized" in msg or "invalid api key" in msg:
+                    raise RuntimeError(
+                        f"API key rejected by {spec.provider} ({spec.base_url}). "
+                        f"Check MATRIOSKA_API_KEY or --api-key.\n  Error: {e}"
+                    ) from e
+                if "404" in msg or "not found" in msg or "model" in msg:
+                    raise RuntimeError(
+                        f"Model '{spec.model}' not found on {spec.provider} ({spec.base_url}). "
+                        f"Check MATRIOSKA_MODEL or --model.\n  Error: {e}"
+                    ) from e
+                if "connection" in msg or "refused" in msg or "timeout" in msg or "resolve" in msg:
+                    raise RuntimeError(
+                        f"Cannot reach {spec.provider} at {spec.base_url}. "
+                        f"Check MATRIOSKA_BASE_URL, network, or firewall.\n  Error: {e}"
+                    ) from e
+                if "429" in msg or "rate limit" in msg:
+                    logger.warning(
+                        "Rate limited during connectivity check — proceeding anyway"
+                    )
+                    return
+                raise RuntimeError(
+                    f"Connectivity check failed for {spec.provider}/{spec.model}.\n"
+                    f"  Error: {e}"
+                ) from e
+
+            logger.debug(
+                "Connectivity OK: %s/%s", spec.provider, spec.model
+            )
 
     def _banner(self, task: str) -> None:
         bar = "=" * 80

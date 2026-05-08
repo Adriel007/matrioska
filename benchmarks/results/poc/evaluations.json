@@ -1,0 +1,498 @@
+[
+  {
+    "orchestrator": "direct",
+    "task_id": "api_auth",
+    "run_id": 0,
+    "num_files": 6,
+    "tokens_used": 1642,
+    "duration_s": 3.2490763664245605,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 0.875,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "ENDPOINTS",
+        "MODELS",
+        "AUTH_FUNCTIONS",
+        "AUTH_MIDDLEWARE",
+        "SECRET_KEY",
+        "TOKEN_TYPE"
+      ],
+      "found": {
+        "ENDPOINTS": true,
+        "MODELS": true,
+        "AUTH_FUNCTIONS": false,
+        "AUTH_MIDDLEWARE": false,
+        "SECRET_KEY": true,
+        "TOKEN_TYPE": true
+      },
+      "missing": [
+        "AUTH_FUNCTIONS",
+        "AUTH_MIDDLEWARE"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 8,
+    "num_tests_passed": 7,
+    "test_output": ".......F                                                                 [100%]\n=================================== FAILURES ===================================\n_________________________ test_server_health_endpoint __________________________\ntest_auth.py:144: in test_server_health_endpoint\n    start_server(project_dir)\ntest_auth.py:65: in start_server\n    raise RuntimeError(\"Server did not start\")\nE   RuntimeError: Server did not start\n=============================== warnings summary ===============================\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    and isinstance(item.value, ast.Str)\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685: DeprecationWarning: Attribute s is deprecated and will be removed in Python 3.14; use value instead\n    doc = item.value.s\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302: PytestConfigWarning: Unknown config option: asyncio_mode\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: 18 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: 18 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    expr = ast.IfExp(test, self.display(name), ast.Str(name.id))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1102: 14 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1102: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    syms.append(ast.Str(sym))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1104: 14 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-pa",
+    "syntax_errors": [],
+    "composite_score": 0.937
+  },
+  {
+    "orchestrator": "direct_plan",
+    "task_id": "api_auth",
+    "run_id": 0,
+    "num_files": 6,
+    "tokens_used": 4382,
+    "duration_s": 17.783848524093628,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 0.75,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "ENDPOINTS",
+        "MODELS",
+        "AUTH_FUNCTIONS",
+        "AUTH_MIDDLEWARE",
+        "SECRET_KEY",
+        "TOKEN_TYPE"
+      ],
+      "found": {
+        "ENDPOINTS": true,
+        "MODELS": true,
+        "AUTH_FUNCTIONS": false,
+        "AUTH_MIDDLEWARE": false,
+        "SECRET_KEY": true,
+        "TOKEN_TYPE": true
+      },
+      "missing": [
+        "AUTH_FUNCTIONS",
+        "AUTH_MIDDLEWARE"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 8,
+    "num_tests_passed": 6,
+    "test_output": ".....F.F                                                                 [100%]\n=================================== FAILURES ===================================\n__________________________ test_routes_has_endpoints ___________________________\ntest_auth.py:129: in test_routes_has_endpoints\n    assert endpoint in content, f\"routes.py missing endpoint '{endpoint}'\"\nE   AssertionError: routes.py missing endpoint '/auth/register'\nE   assert '/auth/register' in 'from fastapi import APIRouter, Depends, HTTPException\\nfrom fastapi.security import HTTPBearer, HTTPAuthorizationCred...ail != \"admin@example.com\":\\n        raise HTTPException(status_code=403, detail=\"Forbidden\")\\n    return current_user'\n_________________________ test_server_health_endpoint __________________________\ntest_auth.py:144: in test_server_health_endpoint\n    start_server(project_dir)\ntest_auth.py:65: in start_server\n    raise RuntimeError(\"Server did not start\")\nE   RuntimeError: Server did not start\n=============================== warnings summary ===============================\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    and isinstance(item.value, ast.Str)\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685: DeprecationWarning: Attribute s is deprecated and will be removed in Python 3.14; use value instead\n    doc = item.value.s\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302: PytestConfigWarning: Unknown config option: asyncio_mode\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: 18 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: 18 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    expr = ast.IfExp(test, self.dis",
+    "syntax_errors": [],
+    "composite_score": 0.875
+  },
+  {
+    "orchestrator": "matrioska",
+    "task_id": "api_auth",
+    "run_id": 0,
+    "num_files": 0,
+    "tokens_used": 0,
+    "duration_s": 0,
+    "syntax_pass_rate": 0.0,
+    "test_pass_rate": 0.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "ENDPOINTS",
+        "MODELS",
+        "AUTH_FUNCTIONS",
+        "AUTH_MIDDLEWARE",
+        "SECRET_KEY",
+        "TOKEN_TYPE"
+      ],
+      "found": {
+        "ENDPOINTS": false,
+        "MODELS": false,
+        "AUTH_FUNCTIONS": false,
+        "AUTH_MIDDLEWARE": false,
+        "SECRET_KEY": false,
+        "TOKEN_TYPE": false
+      },
+      "missing": [
+        "ENDPOINTS",
+        "MODELS",
+        "AUTH_FUNCTIONS",
+        "AUTH_MIDDLEWARE",
+        "SECRET_KEY",
+        "TOKEN_TYPE"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 0,
+    "num_tests_passed": 0,
+    "test_output": "",
+    "composite_score": 0.3
+  },
+  {
+    "orchestrator": "direct",
+    "task_id": "cli_pipeline",
+    "run_id": 0,
+    "num_files": 6,
+    "tokens_used": 1435,
+    "duration_s": 7.004331111907959,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 1.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "MODULES",
+        "CONFIG_FIELDS",
+        "FUNCTIONS",
+        "PIPELINE_FLOW",
+        "ENTRYPOINT"
+      ],
+      "found": {
+        "MODULES": false,
+        "CONFIG_FIELDS": false,
+        "FUNCTIONS": false,
+        "PIPELINE_FLOW": false,
+        "ENTRYPOINT": true
+      },
+      "missing": [
+        "MODULES",
+        "CONFIG_FIELDS",
+        "FUNCTIONS",
+        "PIPELINE_FLOW"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 8,
+    "num_tests_passed": 8,
+    "test_output": "........                                                                 [100%]\n=============================== warnings summary ===============================\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    and isinstance(item.value, ast.Str)\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685: DeprecationWarning: Attribute s is deprecated and will be removed in Python 3.14; use value instead\n    doc = item.value.s\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302: PytestConfigWarning: Unknown config option: asyncio_mode\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: 19 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: 19 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    expr = ast.IfExp(test, self.display(name), ast.Str(name.id))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1102: 14 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1102: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    syms.append(ast.Str(sym))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1104: 14 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1104: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    expls.append(ast.Str(expl))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:817: 55 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/as",
+    "syntax_errors": [],
+    "composite_score": 1.0
+  },
+  {
+    "orchestrator": "direct_plan",
+    "task_id": "cli_pipeline",
+    "run_id": 0,
+    "num_files": 6,
+    "tokens_used": 4024,
+    "duration_s": 24.87891697883606,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 0.875,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "MODULES",
+        "CONFIG_FIELDS",
+        "FUNCTIONS",
+        "PIPELINE_FLOW",
+        "ENTRYPOINT"
+      ],
+      "found": {
+        "MODULES": false,
+        "CONFIG_FIELDS": false,
+        "FUNCTIONS": false,
+        "PIPELINE_FLOW": false,
+        "ENTRYPOINT": true
+      },
+      "missing": [
+        "MODULES",
+        "CONFIG_FIELDS",
+        "FUNCTIONS",
+        "PIPELINE_FLOW"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 8,
+    "num_tests_passed": 7,
+    "test_output": ".......F                                                                 [100%]\n=================================== FAILURES ===================================\n______________________________ test_pipeline_runs ______________________________\ntest_pipeline.py:130: in test_pipeline_runs\n    assert result.returncode in (0, 1), f\"Unexpected exit code {result.returncode}\"\nE   AssertionError: Unexpected exit code 2\nE   assert 2 in (0, 1)\nE    +  where 2 = CompletedProcess(args=['/media/grinch/novovolume/IAs/matrioska/.venv/bin/python3', '/media/grinch/novovolume/IAs/matri...ne.py: error: the following arguments are required: --input_file, --output_file, --columns, --filters, --batch_size\\n').returncode\n=============================== warnings summary ===============================\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    and isinstance(item.value, ast.Str)\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685: DeprecationWarning: Attribute s is deprecated and will be removed in Python 3.14; use value instead\n    doc = item.value.s\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302: PytestConfigWarning: Unknown config option: asyncio_mode\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: 19 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: 19 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    expr = ast.IfExp(test, self.display(name), ast.Str(name.id))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1102: 14 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:1102: DeprecationWarning: ast.Str is dep",
+    "syntax_errors": [],
+    "composite_score": 0.937
+  },
+  {
+    "orchestrator": "matrioska",
+    "task_id": "cli_pipeline",
+    "run_id": 0,
+    "num_files": 0,
+    "tokens_used": 0,
+    "duration_s": 0,
+    "syntax_pass_rate": 0.0,
+    "test_pass_rate": 0.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "MODULES",
+        "CONFIG_FIELDS",
+        "FUNCTIONS",
+        "PIPELINE_FLOW",
+        "ENTRYPOINT"
+      ],
+      "found": {
+        "MODULES": false,
+        "CONFIG_FIELDS": false,
+        "FUNCTIONS": false,
+        "PIPELINE_FLOW": false,
+        "ENTRYPOINT": false
+      },
+      "missing": [
+        "MODULES",
+        "CONFIG_FIELDS",
+        "FUNCTIONS",
+        "PIPELINE_FLOW",
+        "ENTRYPOINT"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 0,
+    "num_tests_passed": 0,
+    "test_output": "",
+    "composite_score": 0.3
+  },
+  {
+    "orchestrator": "direct",
+    "task_id": "fullstack_todo",
+    "run_id": 0,
+    "num_files": 7,
+    "tokens_used": 2311,
+    "duration_s": 3.7391269207000732,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 0.75,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "API_PREFIX",
+        "ENDPOINTS",
+        "TODO_SCHEMA",
+        "DB_URL",
+        "STATIC_DIR",
+        "ENTRYPOINT"
+      ],
+      "found": {
+        "API_PREFIX": false,
+        "ENDPOINTS": true,
+        "TODO_SCHEMA": true,
+        "DB_URL": false,
+        "STATIC_DIR": false,
+        "ENTRYPOINT": false
+      },
+      "missing": [
+        "API_PREFIX",
+        "DB_URL",
+        "STATIC_DIR",
+        "ENTRYPOINT"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 8,
+    "num_tests_passed": 6,
+    "test_output": "..FF....                                                                 [100%]\n=================================== FAILURES ===================================\n___________________________ test_cross_file_imports ____________________________\ntest_fullstack.py:55: in test_cross_file_imports\n    assert imp.lower() in content.lower() or f\"from {imp}\" in content or f\"import {imp}\" in content, \\\nE   AssertionError: main.py should reference database\nE   assert ('database' in 'from fastapi import fastapi, request\\nfrom fastapi.staticfiles import staticfiles\\nfrom fastapi.middleware.cors impor...w_headers=[\"*\"],\\n)\\n\\nif __name__ == \"__main__\":\\n    import uvicorn\\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)' or 'from database' in 'from fastapi import FastAPI, Request\\nfrom fastapi.staticfiles import StaticFiles\\nfrom fastapi.middleware.cors impor...w_headers=[\"*\"],\\n)\\n\\nif __name__ == \"__main__\":\\n    import uvicorn\\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)' or 'import database' in 'from fastapi import FastAPI, Request\\nfrom fastapi.staticfiles import StaticFiles\\nfrom fastapi.middleware.cors impor...w_headers=[\"*\"],\\n)\\n\\nif __name__ == \"__main__\":\\n    import uvicorn\\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)')\nE    +  where 'database' = <built-in method lower of str object at 0xa60378>()\nE    +    where <built-in method lower of str object at 0xa60378> = 'database'.lower\nE    +  and   'from fastapi import fastapi, request\\nfrom fastapi.staticfiles import staticfiles\\nfrom fastapi.middleware.cors impor...w_headers=[\"*\"],\\n)\\n\\nif __name__ == \"__main__\":\\n    import uvicorn\\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)' = <built-in method lower of str object at 0x27852430>()\nE    +    where <built-in method lower of str object at 0x27852430> = 'from fastapi import FastAPI, Request\\nfrom fastapi.staticfiles import StaticFiles\\nfrom fastapi.middleware.cors impor...w_headers=[\"*\"],\\n)\\n\\nif __name__ == \"__main__\":\\n    import uvicorn\\n    uvicorn.run(app, host=\"0.0.0.0\", port=8000)'.lower\n_________________________ test_api_endpoints_in_routes _________________________\ntest_fullstack.py:67: in test_api_endpoints_in_routes\n    assert r in content, f\"routes.py missing '{r}'\"\nE   AssertionError: routes.py missing 'GET'\nE   assert 'GET' in 'from fastapi import APIRouter, Depends, HTTPException\\nfrom sqlalchemy.orm import Session\\nfrom models import TodoCre...tatus_code=404, detail=\"Todo not found\")\\n    db.delete(todo)\\n    db.commit()\\n    return {\"message\": \"Todo deleted\"}'\n=============================== warnings summary ===============================\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683: DeprecationWarning: ast.Str is d",
+    "syntax_errors": [],
+    "composite_score": 0.875
+  },
+  {
+    "orchestrator": "direct_plan",
+    "task_id": "fullstack_todo",
+    "run_id": 0,
+    "num_files": 7,
+    "tokens_used": 5531,
+    "duration_s": 30.46183967590332,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 0.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "API_PREFIX",
+        "ENDPOINTS",
+        "TODO_SCHEMA",
+        "DB_URL",
+        "STATIC_DIR",
+        "ENTRYPOINT"
+      ],
+      "found": {
+        "API_PREFIX": false,
+        "ENDPOINTS": true,
+        "TODO_SCHEMA": true,
+        "DB_URL": false,
+        "STATIC_DIR": false,
+        "ENTRYPOINT": false
+      },
+      "missing": [
+        "API_PREFIX",
+        "DB_URL",
+        "STATIC_DIR",
+        "ENTRYPOINT"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 0,
+    "num_tests_passed": 0,
+    "test_output": "TIMEOUT: /media/grinch/novovolume/IAs/matrioska/benchmarks/tasks/fullstack_todo/tests/test_fullstack.py",
+    "syntax_errors": [],
+    "composite_score": 0.5
+  },
+  {
+    "orchestrator": "matrioska",
+    "task_id": "fullstack_todo",
+    "run_id": 0,
+    "num_files": 0,
+    "tokens_used": 0,
+    "duration_s": 0,
+    "syntax_pass_rate": 0.0,
+    "test_pass_rate": 0.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "API_PREFIX",
+        "ENDPOINTS",
+        "TODO_SCHEMA",
+        "DB_URL",
+        "STATIC_DIR",
+        "ENTRYPOINT"
+      ],
+      "found": {
+        "API_PREFIX": false,
+        "ENDPOINTS": false,
+        "TODO_SCHEMA": false,
+        "DB_URL": false,
+        "STATIC_DIR": false,
+        "ENTRYPOINT": false
+      },
+      "missing": [
+        "API_PREFIX",
+        "ENDPOINTS",
+        "TODO_SCHEMA",
+        "DB_URL",
+        "STATIC_DIR",
+        "ENTRYPOINT"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 0,
+    "num_tests_passed": 0,
+    "test_output": "",
+    "composite_score": 0.3
+  },
+  {
+    "orchestrator": "direct",
+    "task_id": "web_dashboard",
+    "run_id": 0,
+    "num_files": 6,
+    "tokens_used": 2078,
+    "duration_s": 3.074836492538452,
+    "syntax_pass_rate": 1.0,
+    "test_pass_rate": 0.875,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "ENDPOINTS",
+        "METRICS_FIELDS",
+        "SUMMARY_FIELDS",
+        "MODULES",
+        "STATIC_DIR",
+        "CHART_LIB",
+        "RANDOM_SEED"
+      ],
+      "found": {
+        "ENDPOINTS": true,
+        "METRICS_FIELDS": false,
+        "SUMMARY_FIELDS": false,
+        "MODULES": false,
+        "STATIC_DIR": false,
+        "CHART_LIB": false,
+        "RANDOM_SEED": false
+      },
+      "missing": [
+        "METRICS_FIELDS",
+        "SUMMARY_FIELDS",
+        "MODULES",
+        "STATIC_DIR",
+        "CHART_LIB",
+        "RANDOM_SEED"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 8,
+    "num_tests_passed": 7,
+    "test_output": ".......F                                                                 [100%]\n=================================== FAILURES ===================================\n_________________________ test_server_metrics_endpoint _________________________\ntest_dashboard.py:119: in test_server_metrics_endpoint\n    start_server(project_dir)\ntest_dashboard.py:44: in start_server\n    raise RuntimeError(\"Server did not start\")\nE   RuntimeError: Server did not start\n=============================== warnings summary ===============================\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:683: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    and isinstance(item.value, ast.Str)\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:685: DeprecationWarning: Attribute s is deprecated and will be removed in Python 3.14; use value instead\n    doc = item.value.s\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/config/__init__.py:1302: PytestConfigWarning: Unknown config option: asyncio_mode\n  \n    self._warn_or_fail_if_strict(f\"Unknown config option: {key}\\n\")\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: 25 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:965: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    inlocs = ast.Compare(ast.Str(name.id), [ast.In()], [locs])\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: 25 warnings\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:968: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    expr = ast.IfExp(test, self.display(name), ast.Str(name.id))\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:927\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:927\n  /media/grinch/novovolume/IAs/matrioska/.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:927: DeprecationWarning: ast.Str is deprecated and will be removed in Python 3.14; use ast.Constant instead\n    assertmsg = ast.Str(\"\")\n\n../../../../../.venv/lib/python3.13/site-packages/_pytest/assertion/rewrite.py:929: 15 wa",
+    "syntax_errors": [],
+    "composite_score": 0.937
+  },
+  {
+    "orchestrator": "direct_plan",
+    "task_id": "web_dashboard",
+    "run_id": 0,
+    "num_files": 0,
+    "tokens_used": 0,
+    "duration_s": 0,
+    "syntax_pass_rate": 0.0,
+    "test_pass_rate": 0.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "ENDPOINTS",
+        "METRICS_FIELDS",
+        "SUMMARY_FIELDS",
+        "MODULES",
+        "STATIC_DIR",
+        "CHART_LIB",
+        "RANDOM_SEED"
+      ],
+      "found": {
+        "ENDPOINTS": false,
+        "METRICS_FIELDS": false,
+        "SUMMARY_FIELDS": false,
+        "MODULES": false,
+        "STATIC_DIR": false,
+        "CHART_LIB": false,
+        "RANDOM_SEED": false
+      },
+      "missing": [
+        "ENDPOINTS",
+        "METRICS_FIELDS",
+        "SUMMARY_FIELDS",
+        "MODULES",
+        "STATIC_DIR",
+        "CHART_LIB",
+        "RANDOM_SEED"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 0,
+    "num_tests_passed": 0,
+    "test_output": "",
+    "composite_score": 0.3
+  },
+  {
+    "orchestrator": "matrioska",
+    "task_id": "web_dashboard",
+    "run_id": 0,
+    "num_files": 0,
+    "tokens_used": 0,
+    "duration_s": 0,
+    "syntax_pass_rate": 0.0,
+    "test_pass_rate": 0.0,
+    "contract_fulfillment": {
+      "expected_keys": [
+        "ENDPOINTS",
+        "METRICS_FIELDS",
+        "SUMMARY_FIELDS",
+        "MODULES",
+        "STATIC_DIR",
+        "CHART_LIB",
+        "RANDOM_SEED"
+      ],
+      "found": {
+        "ENDPOINTS": false,
+        "METRICS_FIELDS": false,
+        "SUMMARY_FIELDS": false,
+        "MODULES": false,
+        "STATIC_DIR": false,
+        "CHART_LIB": false,
+        "RANDOM_SEED": false
+      },
+      "missing": [
+        "ENDPOINTS",
+        "METRICS_FIELDS",
+        "SUMMARY_FIELDS",
+        "MODULES",
+        "STATIC_DIR",
+        "CHART_LIB",
+        "RANDOM_SEED"
+      ],
+      "fulfillment_rate": 1.0
+    },
+    "cross_file_score": 1.0,
+    "num_tests_total": 0,
+    "num_tests_passed": 0,
+    "test_output": "",
+    "composite_score": 0.3
+  }
+]

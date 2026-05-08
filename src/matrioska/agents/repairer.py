@@ -1,42 +1,80 @@
 """
 Repairer agent — fixes broken code using real error feedback.
 
-Unlike the Generator which creates from scratch, the Repairer receives
-the previous content + validation errors and produces a corrected version.
-This implements the Repair loop from §4.4.2.
+Two modes (SWE-agent ACI inspiration, arXiv:2405.15793):
+
+  ACI mode (use_aci_repair=True, default):
+    Asks the model for a TARGETED PATCH — a list of hunks (start_line, end_line,
+    new_content) applied surgically.  Preserves invariants, avoids cross-file
+    drift from full-file rewrites.  Errors with a precise line number trigger
+    this mode automatically.
+
+  Full-file mode (use_aci_repair=False or fallback):
+    Classic "produce the corrected complete file" approach.  Used when the
+    error doesn't map to specific lines or ACI patch fails to apply.
 """
 
 from __future__ import annotations
 
+import json
 import logging
+import re
 import time
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from matrioska.core.config import Config, ModelSpec
 from matrioska.core.events import EventBus
 from matrioska.core.state import FileSpec
+from matrioska.core.text_utils import strip_fences
 from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.agents.repairer")
 
-REPAIRER_SYSTEM_PROMPT = """You are Matrioska Repairer. Fix a broken file based on validation feedback.
+REPAIRER_SYSTEM_FULL = """You are Matrioska Repairer. Fix a broken file based on validation feedback.
 
 You receive:
-  1. The original generation prompt
+  1. The original file specification (what this file must contain/do)
   2. The previous file content that failed validation
-  3. The validation error(s)
+  3. The specific validation error(s) — parse errors, missing imports, etc.
 
-Your job: produce the COMPLETE CORRECTED file. Do not explain the fix.
-Emit only the corrected content. If tool use is available, call `finish`.
-Otherwise, output raw content + optional SHARED_STATE_UPDATE block.
+CRITICAL RULES:
+- Output ONLY the complete corrected file content, no explanations
+- The output must be SYNTACTICALLY VALID for the target language
+- Fix ALL errors listed in the validation feedback
+- Do NOT truncate — produce the entire file
+- Do NOT add new features or refactor — only fix the errors
+- Preserve the file's original structure unless the error requires restructuring
+- If the error is a Python syntax error at line N, verify lines N-2 to N+2 carefully
+- If tool use is available, call `finish` with the corrected content
+"""
+
+REPAIRER_SYSTEM_ACI = """You are Matrioska Repairer (ACI mode). Fix ONLY the broken parts of a file.
+
+You receive the file content with line numbers and specific errors.
+Your job: output a JSON array of targeted patch hunks to apply.
+
+OUTPUT FORMAT — a JSON array, each hunk:
+{
+  "start_line": <1-indexed line where replacement begins>,
+  "end_line":   <1-indexed line where replacement ends (inclusive)>,
+  "new_content": "<replacement lines as a string, newline-separated>"
+}
+
+RULES:
+- Output ONLY the JSON array, nothing else.
+- Replace the minimum number of lines needed to fix each error.
+- If an error requires adding lines: set end_line = start_line - 1 (insertion before start_line).
+- Preserve indentation exactly.
+- Each hunk must fix at least one error from the list.
+- Hunks must be non-overlapping and sorted by start_line descending (apply bottom-up).
+- If you cannot express the fix as targeted hunks, output an empty array [] to trigger full-file fallback.
 """
 
 
 class RepairerAgent:
     """Fixes code that failed validation using error feedback.
 
-    Run when the Generator's output fails syntax or contract checks.
-    The repairer sees the error and produces a corrected version.
+    Tries ACI patch mode first (SWE-agent style), falls back to full-file repair.
     """
 
     def __init__(
@@ -55,34 +93,113 @@ class RepairerAgent:
         previous_content: str,
         errors: List[str],
         shared_context: Optional[Dict[str, Any]] = None,
+        test_failures: Optional[List[str]] = None,
     ) -> str:
         """Produce a repaired version of the file content.
 
         Args:
             spec: The original file specification.
             previous_content: The content that failed validation.
-            errors: List of validation error messages.
+            errors: Validation error messages (syntax/contract).
             shared_context: Current shared state for context.
+            test_failures: Test failure messages from TestDesigner (AlphaCodium signal).
 
         Returns:
             Corrected file content, or empty string on failure.
         """
+        all_errors = list(errors)
+        if test_failures:
+            all_errors += [f"[test] {f}" for f in test_failures]
+
+        if self.cfg.use_aci_repair and self._has_line_errors(all_errors):
+            patched = self._aci_repair(spec, previous_content, all_errors, shared_context)
+            if patched:
+                return patched
+            logger.info("ACI repair produced no hunks for %s — falling back to full-file", spec.filename)
+
+        return self._full_repair(spec, previous_content, all_errors, shared_context)
+
+    # ── ACI mode ──────────────────────────────────────────────────────────
+
+    def _aci_repair(
+        self,
+        spec: FileSpec,
+        content: str,
+        errors: List[str],
+        context: Optional[Dict[str, Any]],
+    ) -> str:
+        """Ask the model for targeted line-range patches, apply them."""
+        ms = self.cfg.effective_repairer
+        numbered = _number_lines(content)
+
+        error_text = "\n".join(f"- {e}" for e in errors)
+        prompt = (
+            f"FILE: {spec.name}.{spec.extension}\n\n"
+            f"CONTENT (line numbers for reference):\n{numbered}\n\n"
+            f"ERRORS TO FIX:\n{error_text}\n\n"
+            f"Output a JSON array of patch hunks. "
+            f"Empty array [] if you need a full rewrite."
+        )
+        if context:
+            ctx_str = "\n".join(f"- {k}: {v}" for k, v in context.items() if not k.startswith("_"))
+            prompt += f"\n\nSHARED STATE:\n{ctx_str}"
+
+        self._emit("agent_call", agent="repairer_aci", model=ms.model)
+        t0 = time.time()
+
+        try:
+            resp = self.llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model_spec=ms,
+                system=REPAIRER_SYSTEM_ACI,
+                json_mode=True,
+            )
+        except Exception as e:
+            logger.error("ACI repairer call failed: %s", e)
+            return ""
+
+        self._emit("agent_done", agent="repairer_aci", elapsed_s=round(time.time() - t0, 2))
+
+        hunks = _parse_hunks(resp.text)
+        if not hunks:
+            return ""
+
+        try:
+            patched = _apply_hunks(content, hunks)
+            logger.info("ACI repair: applied %d hunk(s) to %s", len(hunks), spec.filename)
+            return patched
+        except Exception as e:
+            logger.warning("ACI hunk application failed: %s", e)
+            return ""
+
+    # ── Full-file mode ────────────────────────────────────────────────────
+
+    def _full_repair(
+        self,
+        spec: FileSpec,
+        previous_content: str,
+        errors: List[str],
+        context: Optional[Dict[str, Any]],
+    ) -> str:
         ms = self.cfg.effective_repairer
 
         error_text = "\n".join(f"- {e}" for e in errors)
         prompt = (
             f"FILE: {spec.name}.{spec.extension}\n\n"
-            f"ORIGINAL PROMPT:\n{spec.content}\n\n"
+            f"ORIGINAL SPECIFICATION:\n{spec.content}\n\n"
+            f"DETAILS:\n{spec.details}\n\n"
+            f"SHARED STATE READS: {', '.join(spec.shared_state_reads) if spec.shared_state_reads else '(none)'}\n"
+            f"SHARED STATE WRITES: {', '.join(spec.shared_state_writes) if spec.shared_state_writes else '(none)'}\n\n"
             f"FAILED CONTENT:\n```{spec.extension}\n{previous_content[:6000]}\n```\n\n"
             f"VALIDATION ERRORS:\n{error_text}\n\n"
             f"Produce the COMPLETE CORRECTED file content. "
             f"Fix ALL errors listed above. Do not truncate. Do not explain."
         )
 
-        if shared_context:
+        if context:
             ctx_str = "\n".join(
                 f"- {k}: {v}"
-                for k, v in shared_context.items()
+                for k, v in context.items()
                 if not k.startswith("_")
             )
             prompt += f"\n\nSHARED STATE:\n{ctx_str}"
@@ -94,45 +211,91 @@ class RepairerAgent:
             resp = self.llm.chat(
                 messages=[{"role": "user", "content": prompt}],
                 model_spec=ms,
-                system=REPAIRER_SYSTEM_PROMPT,
+                system=REPAIRER_SYSTEM_FULL,
             )
         except Exception as e:
             logger.error("Repairer call failed: %s", e)
             return ""
 
-        elapsed = time.time() - t0
         self._emit(
             "agent_done",
             agent="repairer",
             model=ms.model,
             prompt_tokens=resp.prompt_tokens,
             completion_tokens=resp.completion_tokens,
-            elapsed_s=round(elapsed, 2),
+            elapsed_s=round(time.time() - t0, 2),
         )
 
-        # Extract content from response, stripping code fences
-        content = _strip_fences(resp.text)
+        content = strip_fences(resp.text)
         if resp.tool_calls:
             for tc in resp.tool_calls:
                 if tc.name == "finish":
-                    content = _strip_fences(str(tc.arguments.get("content", "")))
+                    content = strip_fences(str(tc.arguments.get("content", "")))
                     break
 
-        logger.info("Repairer produced %d chars for %s", len(content), spec.filename)
+        logger.info("Full repair produced %d chars for %s", len(content), spec.filename)
         return content.strip()
+
+    # ── Helpers ───────────────────────────────────────────────────────────
+
+    @staticmethod
+    def _has_line_errors(errors: List[str]) -> bool:
+        """True if any error references a specific line number."""
+        line_pattern = re.compile(r'line\s+\d+|:\d+:', re.IGNORECASE)
+        return any(line_pattern.search(e) for e in errors)
 
     def _emit(self, name: str, **data: Any) -> None:
         if self.bus:
             self.bus.emit_named(name, **data)
 
 
-def _strip_fences(text: str) -> str:
-    """Strip markdown code fences from model output."""
-    t = text.strip()
-    for fence in ("```python", "```py", "```sql", "```json", "```yaml", "```", "``"):
-        if t.startswith(fence):
-            t = t[len(fence):].strip()
-            if t.endswith("```"):
-                t = t[:-3].strip()
-            break
-    return t
+# ── Patch helpers ─────────────────────────────────────────────────────────────
+
+
+def _number_lines(content: str) -> str:
+    lines = content.splitlines()
+    width = len(str(len(lines)))
+    return "\n".join(f"{i + 1:{width}}| {line}" for i, line in enumerate(lines))
+
+
+def _parse_hunks(text: str) -> List[Dict[str, Any]]:
+    """Parse JSON hunk array from model response."""
+    text = text.strip()
+    # Strip any accidental fences
+    if text.startswith("```"):
+        text = re.sub(r"^```[a-z]*\n?", "", text)
+        text = re.sub(r"\n?```$", "", text)
+    try:
+        hunks = json.loads(text)
+        if not isinstance(hunks, list):
+            return []
+        valid = []
+        for h in hunks:
+            if (
+                isinstance(h, dict)
+                and isinstance(h.get("start_line"), int)
+                and isinstance(h.get("end_line"), int)
+                and isinstance(h.get("new_content"), str)
+            ):
+                valid.append(h)
+        return valid
+    except Exception:
+        try:
+            from json_repair import repair_json
+            hunks = json.loads(repair_json(text))
+            return hunks if isinstance(hunks, list) else []
+        except Exception:
+            return []
+
+
+def _apply_hunks(content: str, hunks: List[Dict[str, Any]]) -> str:
+    """Apply patch hunks bottom-up so line numbers stay valid."""
+    lines = content.splitlines(keepends=True)
+    # Sort descending by start_line
+    for hunk in sorted(hunks, key=lambda h: h["start_line"], reverse=True):
+        start = hunk["start_line"] - 1   # convert to 0-indexed
+        end = hunk["end_line"]            # exclusive in slice
+        new_text = hunk["new_content"]
+        new_lines = [l if l.endswith("\n") else l + "\n" for l in new_text.splitlines()]
+        lines[start:end] = new_lines
+    return "".join(lines)

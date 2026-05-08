@@ -1,0 +1,10 @@
+{
+  "id": "web_landing",
+  "category": "web",
+  "expected_file_count": [1, 3],
+  "expected_extensions": ["html", "css"],
+  "min_shared_state_keys": 4,
+  "source_files": ["index.html", "styles.css"],
+  "complexity": "simple",
+  "tags": ["html", "css", "responsive", "landing-page"]
+}

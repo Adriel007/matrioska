@@ -1,0 +1,10 @@
+{
+  "id": "config_docker",
+  "category": "config",
+  "expected_file_count": [1, 3],
+  "expected_extensions": ["yml", "yaml", "dockerignore"],
+  "min_shared_state_keys": 5,
+  "source_files": ["docker-compose.yml", ".dockerignore"],
+  "complexity": "simple",
+  "tags": ["docker", "devops", "postgresql", "fastapi"]
+}

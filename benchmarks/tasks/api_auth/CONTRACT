@@ -1,0 +1,6 @@
+ENDPOINTS = ["POST /auth/register", "POST /auth/login", "GET /users/me", "GET /health"]
+MODELS = ["UserCreate", "UserResponse", "TokenResponse"]
+AUTH_FUNCTIONS = ["create_token", "verify_token"]
+AUTH_MIDDLEWARE = ["get_current_user"]
+SECRET_KEY = "benchmark-secret-key-123"
+TOKEN_TYPE = "bearer"

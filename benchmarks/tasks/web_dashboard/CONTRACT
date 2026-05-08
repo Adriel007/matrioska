@@ -1,0 +1,7 @@
+ENDPOINTS = ["GET /api/metrics", "GET /api/summary"]
+METRICS_FIELDS = ["cpu", "memory", "requests", "labels"]
+SUMMARY_FIELDS = ["total_requests", "avg_cpu", "avg_memory", "uptime_hours"]
+MODULES = ["api.py", "data.py"]
+STATIC_DIR = "./static"
+CHART_LIB = "chart.js"
+RANDOM_SEED = 42

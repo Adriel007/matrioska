@@ -1,0 +1,2 @@
+BOOK_SCHEMA = {"id": "int", "title": "str", "author": "str", "year": "int"}
+ENDPOINTS = ["GET /books", "GET /books/{id}", "POST /books", "PUT /books/{id}", "DELETE /books/{id}"]

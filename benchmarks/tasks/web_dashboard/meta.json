@@ -1,0 +1,10 @@
+{
+  "id": "web_dashboard",
+  "category": "fullstack",
+  "expected_file_count": [4, 8],
+  "expected_extensions": ["py", "html", "js", "css", "txt"],
+  "min_shared_state_keys": 5,
+  "source_files": ["api.py", "data.py", "static/index.html", "static/dashboard.js", "static/styles.css"],
+  "complexity": "complex",
+  "tags": ["python", "fastapi", "chartjs", "dashboard", "multi-file"]
+}

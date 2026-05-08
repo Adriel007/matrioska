@@ -1,0 +1,5 @@
+SERVICES = ["app", "db"]
+APP_PORT = 8000
+DB_PORT = 5432
+DB_IMAGE = "postgres:16"
+NETWORK = "app-network"

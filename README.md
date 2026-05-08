@@ -2,13 +2,13 @@
 
 **Contract-first, state-graph multi-agent LLM orchestrator for code generation.**
 
-Matrioska decomposes complex coding tasks into a DAG of files that coordinate through a typed `shared_state` whiteboard. Three pipeline phases — Architecture (with Tree-of-Thoughts voting), Generation (DAG-layered parallel with Reflexion + Repair), and Verification (contract validation + sandbox execution) — produce complete, validated projects.
+Matrioska decomposes complex coding tasks into a DAG of files that coordinate through a typed `shared_state` whiteboard. Three pipeline phases — Architecture (with Tree-of-Thoughts voting), Generation (DAG-layered parallel with AlphaCodium test enrichment + Reflexion + ACI Repair), and Verification (contract validation + sandbox execution) — produce complete, validated projects.
 
 ## Architecture
 
 ```
 Task → [Phase 1: N× Architect → Judge → Best Plan]
-    → [Phase 2: DAG layers → Generate ∥ Validate ∥ Repair ∥ Reflect]
+    → [Phase 2: DAG layers → TestDesign ∥ Generate ∥ Validate ∥ ACIRepair ∥ Reflect]
     → [Phase 3: Contract check → Cross-file → Sandbox → Replan?]
     → Output + Episodic Note
 ```
@@ -20,7 +20,7 @@ src/matrioska/
 ├── core/         State graph, typed contracts, events, config
 ├── llm/          Multi-provider client, circuit breaker, MoE router
 ├── memory/       Episodic → Semantic → Procedural (3-tier)
-├── agents/       Architect, Generator, Validator, Judge, Repairer, Reflector
+├── agents/       Architect, Generator, TestDesigner, Validator, Judge, Repairer, Reflector
 ├── pipeline/     3-phase orchestration with checkpointing
 ├── tools/        Sandbox executor, tool dispatcher
 ├── eval/         Metrics, golden regression suite (30 tasks)
@@ -35,13 +35,16 @@ src/matrioska/
 | **Coordination** | Typed shared_state contracts | Prevents chain hallucination (MetaGPT insight) |
 | **DAG** | Kahn topological layers | Enables intra-layer parallelism |
 | **Architecture** | Tree-of-Thoughts (N candidates → Judge voting) | 70pp improvement on reasoning tasks (Yao et al.) |
+| **Test Design** | Contract-first TestDesigner (blind to code) | Eliminates "test-the-bug-you-wrote" (AgentCoder, arXiv:2312.13010) |
+| **Generation** | AlphaCodium flow: tests → generate → smoke-check | GPT-4: 19%→44% pass@5 on CodeContests (arXiv:2401.08500) |
 | **Validation** | Process supervision (syntax + contracts per-file) | Outperforms outcome-only (Lightman et al.) |
-| **Repair** | Real error feedback → Repairer agent | CRITIC-inspired (Gou et al.) |
+| **Repair** | ACI targeted patch (hunks) + full-file fallback | Preserves cross-file invariants (SWE-agent, arXiv:2405.15793) |
 | **Reflection** | Verbal reflection → episodic memory | 91% HumanEval (Shinn et al.) |
 | **Memory** | Episodic → Semantic → Procedural | Multi-timescale retrieval |
 | **Models** | Role-specific (Architect≠Generator≠Validator) | Right capability/cost per role |
 | **State** | Checkpointed state graph | Resume, branching, time-travel debug |
 | **Execution** | Docker sandbox (optional) | Ground truth feedback (AutoDev-inspired) |
+| **Fallback** | Agentless single-shot when orchestrator fails | Safety net (arXiv:2407.01489) |
 | **DSPy** | Prompt compilation scaffold | Smaller models via optimized few-shots |
 
 ## Quick Start
@@ -120,13 +123,29 @@ for a in result["artifacts"]:
 - Judge evaluates each plan on completeness, minimality, consistency, feasibility
 - Best plan selected via voting; structured JSON output (`ARCHITECTURE_JSON_SCHEMA`)
 
-### Phase 2: Generation (DAG-layered parallel)
-- Files partitioned into topological layers via Kahn's algorithm
-- Files within a layer generated in parallel (ThreadPoolExecutor)
-- Each file: Generate → Validate (AST/syntax) → (fail) Repair → (fail) Mark failed
-- Optional Reflexion loop: Reflector reviews output, feeds insights forward
-- Optional Multi-Agent Debate for complex files (2 generators → Judge picks best)
-- Complex files spawn recursive nested Matrioska sub-agents
+### Phase 2: Generation (AlphaCodium + AgentCoder flow)
+
+Each file in the DAG goes through:
+
+```
+[TestDesigner] → contract-first tests (blind to code)
+      ↓
+[Generator]   → code that targets those tests
+      ↓
+[Validator]   → AST syntax + contract checks
+      ↓
+[TestRunner]  → inline smoke check against designer tests
+      ↓ (fail)
+[ACIRepairer] → targeted hunk patch or full-file fallback
+      ↓
+[Reflector]   → verbal reflection → episodic memory
+```
+
+1. **TestDesigner** (AgentCoder, arXiv:2312.13010): generates 3-5 structural/interface tests from the file's contract — *without seeing any code*. Eliminates the bias of testing your own bugs.
+2. **AlphaCodium flow** (arXiv:2401.08500): tests injected into the Generator prompt as implementation targets. After syntax validation passes, tests run inline as a smoke check. Failures become concrete repair signal.
+3. **ACI Repairer** (SWE-agent, arXiv:2405.15793): dual-mode repair. When errors reference specific line numbers, asks the model for targeted JSON patch hunks (`start_line`, `end_line`, `new_content`) applied surgically bottom-up. Falls back to full-file repair when hunks fail to apply. Preserves cross-file invariants instead of rewriting from scratch.
+4. **Reflexion loop** (Shinn et al., 2023): Reflector reviews generated artifacts and feeds verbal insights forward into subsequent generations.
+5. Complex files spawn recursive nested Matrioska sub-agents.
 
 ### Phase 3: Verification & Integration
 - Contract validation: every file's `shared_state_writes` populated and typed
@@ -168,14 +187,13 @@ contract = FileContract(
 | Role | Default Model | Why |
 |------|--------------|-----|
 | Architect | gpt-4o / claude-opus-4 | Strong reasoning for decomposition |
+| TestDesigner | gpt-4o-mini / claude-haiku-4.5 | Cheap — structural tests from contract |
 | Generator | gpt-4o-mini / claude-sonnet-4 | Balanced cost/quality |
 | Validator | gpt-4o-mini / claude-haiku-4.5 | Cheap and fast |
 | Judge | gpt-4o / claude-sonnet-4 | Analytical precision |
 | Repairer | (same as Generator) | Focused on debugging |
 
-MoE routing (`.py → claude-sonnet-4`, `.sql → gpt-4o`, etc.) only applies to
-official OpenAI/Anthropic APIs. Third-party providers (Groq, NVIDIA, Ollama)
-use the configured model directly — set `MATRIOSKA_<ROLE>_MODEL` explicitly.
+MoE routing (`.py → claude-sonnet-4`, `.sql → gpt-4o`, etc.) applies to official OpenAI/Anthropic APIs. Third-party providers (Groq, NVIDIA, Ollama, OpenRouter) use the configured model directly — set `MATRIOSKA_<ROLE>_MODEL` explicitly.
 
 Override per role:
 ```bash
@@ -230,20 +248,26 @@ All options: CLI flags, env vars (`MATRIOSKA_<UPPER>`), or `.env` file.
 | `--sandbox` | `MATRIOSKA_ENABLE_SANDBOX` | `false` | Enable Docker sandbox execution |
 | `--reflexion` | `MATRIOSKA_ENABLE_REFLEXION` | `true` | Enable Reflexion loop |
 | `--retrieve-k` | `MATRIOSKA_RETRIEVE_K` | `3` | Past runs to retrieve as context |
+| _(flag TBD)_ | `MATRIOSKA_ENABLE_TEST_DESIGN` | `true` | AlphaCodium+AgentCoder test enrichment |
+| _(flag TBD)_ | `MATRIOSKA_USE_ACI_REPAIR` | `true` | SWE-agent ACI targeted patch repair |
 
 See `.env.example` for the full reference.
 
 ## Theoretical Foundations
 
-- **MetaGPT** (Hong et al., 2023): SOPs as prompts → our typed shared_state contracts
+- **MetaGPT** (Hong et al., 2023): SOPs as prompts → typed shared_state contracts
 - **Tree of Thoughts** (Yao et al., NeurIPS 2023): N candidates → Judge → voting
 - **Reflexion** (Shinn et al., 2023): Verbal reflection → episodic memory → 91% HumanEval
 - **Process Supervision** (Lightman et al., 2023): Validate intermediate steps, not just output
 - **CRITIC** (Gou et al., 2023): Tool-augmented self-correction
 - **CodePlan** (Bairi et al., 2023): Repository-level editing as dependency analysis
 - **DSPy** (Khattab et al., 2023): Prompts as compilable parameters
-- **SWE-Agent** (Yang et al., NeurIPS 2024): Agent-Computer Interface
-- **More Agents Is All You Need** (Li et al., TMLR 2024): Sampling + voting scales with difficulty
+- **AgentCoder** (Huang et al., 2024, arXiv:2312.13010): Blind test designer eliminates test-the-bug bias; 96.3% HumanEval
+- **AlphaCodium** (Ridnik et al., 2024, arXiv:2401.08500): Flow engineering with test enrichment; GPT-4 19%→44% CodeContests
+- **SWE-agent** (Yang et al., NeurIPS 2024, arXiv:2405.15793): Agent-Computer Interface with targeted edits
+- **Agentless** (Xia et al., 2024, arXiv:2407.01489): Deterministic localize→repair→validate as safety net
+- **AutoCodeRover** (Zhang et al., ISSTA 2024, arXiv:2404.05427): AST-level context for cross-file repairs
+- **LATS** (Zhou et al., ICML 2024, arXiv:2310.04406): MCTS with value function over agent trajectories
 
 ## License
 

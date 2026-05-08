@@ -1,0 +1,3 @@
+PAGE_TITLE = "CloudFlow"
+SECTIONS = ["hero", "features", "footer"]
+CTA_LINK = "#signup"
