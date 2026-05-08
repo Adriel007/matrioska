@@ -112,6 +112,15 @@
 
 ## Eval & Metrics
 
+- [ ] **Benchmark parallelization** — `poc.py` currently runs tasks and orchestrators
+  sequentially: `for task in tasks: for orch in ORCHESTRATORS:`. Since tasks are
+  independent (no inter-task dependencies), they could run in parallel via
+  ProcessPoolExecutor, reducing benchmark time from ~40min to ~10min. Similarly,
+  orchestrators on the same task are independent and could run in parallel.
+  Caveat: daily API quota is shared, so parallel runs may hit rate limits sooner.
+  Recommend: parallelize tasks first (ProcessPoolExecutor with max_workers=2-3),
+  then orchestrators if quota permits.
+
 - [x] **Evaluator `fulfillment_rate` bug** — `len(found) / len(expected_keys)` was
   always 1.0 because `found` dict contained ALL keys (including False values) —
   `len(found) == len(expected_keys)` always. Fixed to `sum(1 for v in found.values() if v) / len(expected_keys)`.
