@@ -3,17 +3,34 @@ Matrioska CLI Dashboard — Rich-based live cockpit.
 
 Layout:
   ┌─ header ──────────────────────────────────────────┐
-  │ task + status + elapsed                            │
+  │ task + status + elapsed + key hints                │
   ├─ api_slots ──────┬─ progress ─────────────────────┤
   │ slot table       │ phase progress + file list      │
   │ tokens / cost    │                                 │
   ├─ events ─────────┴─────────────────────────────────┤
   │ scrolling event log                                 │
   └─────────────────────────────────────────────────────┘
+
+  When paused, a pause overlay replaces the events panel:
+  ┌─ PAUSED ───────────────────────────────────────────┐
+  │ [m] model   [e] effort   [r] max_repairs  [s] stream│
+  │ [p/Space] resume         [q] abort                  │
+  └─────────────────────────────────────────────────────┘
+
+Keyboard controls (requires a real TTY):
+  p / Space   — pause / resume
+  q / Esc     — abort (first press shows confirmation, second confirms)
+  During pause:
+    m          — edit model (drops into input line)
+    e          — cycle effort  low → medium → high → low
+    r          — cycle max_repairs  1 → 2 → 3 → 5 → 1
+    s          — toggle stream_tokens
 """
 
 from __future__ import annotations
 
+import queue
+import sys
 import threading
 import time
 from collections import deque
@@ -22,12 +39,10 @@ from datetime import datetime
 from typing import Any, Callable, Deque, Dict, List, Optional
 
 from rich import box
-from rich.columns import Columns
-from rich.console import Console
+from rich.console import Console, Group
 from rich.layout import Layout
 from rich.live import Live
 from rich.panel import Panel
-from rich.progress import BarColumn, Progress, SpinnerColumn, TaskID, TextColumn
 from rich.table import Table
 from rich.text import Text
 
@@ -79,6 +94,12 @@ class DashboardState:
     # Events log (newest last, capped)
     events: Deque[str] = field(default_factory=lambda: deque(maxlen=12))
 
+    # Control
+    paused: bool = False
+    abort_pending: bool = False   # first q pressed — waiting for confirm
+    abort_pending_at: float = 0.0
+    abort_requested: bool = False
+
     # Final
     done: bool = False
     final_status: str = ""
@@ -98,6 +119,165 @@ class DashboardState:
                 return
 
 
+# ── Keyboard controller ────────────────────────────────────────────────────────
+
+
+class KeyboardController:
+    """Non-blocking raw keyboard reader. No-op when stdin is not a TTY."""
+
+    def __init__(self) -> None:
+        self._queue: queue.Queue[str] = queue.Queue()
+        self._stop = threading.Event()
+        self._thread: Optional[threading.Thread] = None
+        self._old_settings: Any = None
+        self._fd: int = -1
+        self._active = False
+
+    def start(self) -> bool:
+        if not sys.stdin.isatty():
+            return False
+        try:
+            import termios, tty
+            self._fd = sys.stdin.fileno()
+            self._old_settings = termios.tcgetattr(self._fd)
+            # setcbreak: chars come through immediately; Ctrl+C still raises SIGINT
+            tty.setcbreak(self._fd)
+            self._thread = threading.Thread(target=self._loop, daemon=True)
+            self._thread.start()
+            self._active = True
+            return True
+        except Exception:
+            return False
+
+    def stop(self) -> None:
+        self._stop.set()
+        self._active = False
+        if self._old_settings is not None:
+            try:
+                import termios
+                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
+            except Exception:
+                pass
+
+    def restore_cooked(self) -> None:
+        """Temporarily restore cooked mode for console.input() calls."""
+        if self._old_settings is not None:
+            try:
+                import termios
+                termios.tcsetattr(self._fd, termios.TCSADRAIN, self._old_settings)
+            except Exception:
+                pass
+
+    def set_cbreak(self) -> None:
+        """Re-enter cbreak mode after restore_cooked()."""
+        try:
+            import termios, tty
+            tty.setcbreak(self._fd)
+        except Exception:
+            pass
+
+    def _loop(self) -> None:
+        import select
+        while not self._stop.is_set():
+            try:
+                if select.select([sys.stdin], [], [], 0.1)[0]:
+                    ch = sys.stdin.read(1)
+                    self._queue.put(ch)
+            except Exception:
+                break
+
+    def get(self) -> Optional[str]:
+        try:
+            return self._queue.get_nowait()
+        except queue.Empty:
+            return None
+
+    def flush(self) -> None:
+        while not self._queue.empty():
+            try:
+                self._queue.get_nowait()
+            except queue.Empty:
+                break
+
+
+# ── Config helpers ─────────────────────────────────────────────────────────────
+
+_EFFORT_LEVELS = ["low", "medium", "high"]
+
+
+def _effort_label(cfg: Any) -> str:
+    if not cfg.enable_tot and cfg.architect_candidates <= 1:
+        return "low"
+    if cfg.enable_tot and cfg.architect_candidates >= 5:
+        return "high"
+    return "medium"
+
+
+def _apply_effort(cfg: Any, level: str) -> None:
+    if level == "low":
+        cfg.enable_tot = False
+        cfg.enable_reflexion = False
+        cfg.enable_test_design = False
+        cfg.architect_candidates = 1
+    elif level == "high":
+        cfg.enable_tot = True
+        cfg.enable_reflexion = True
+        cfg.enable_test_design = True
+        cfg.architect_candidates = 5
+    else:  # medium
+        cfg.enable_tot = True
+        cfg.enable_reflexion = True
+        cfg.enable_test_design = True
+        cfg.architect_candidates = 3
+
+
+def _cycle_effort(state: DashboardState, cfg: Any) -> None:
+    current = _effort_label(cfg)
+    idx = _EFFORT_LEVELS.index(current)
+    next_level = _EFFORT_LEVELS[(idx + 1) % len(_EFFORT_LEVELS)]
+    _apply_effort(cfg, next_level)
+    state.add_event(f"[cyan]effort → {next_level}[/]")
+
+
+_REPAIR_CYCLE = [1, 2, 3, 5]
+
+
+def _cycle_max_repairs(state: DashboardState, cfg: Any) -> None:
+    current = cfg.max_repairs
+    try:
+        idx = _REPAIR_CYCLE.index(current)
+    except ValueError:
+        idx = 0
+    next_val = _REPAIR_CYCLE[(idx + 1) % len(_REPAIR_CYCLE)]
+    cfg.max_repairs = next_val
+    state.add_event(f"[cyan]max_repairs → {next_val}[/]")
+
+
+def _edit_model(
+    live: Live,
+    keyboard: KeyboardController,
+    state: DashboardState,
+    cfg: Any,
+    console: Console,
+) -> None:
+    """Stop Live, drop to cooked mode, get new model name, resume."""
+    keyboard.restore_cooked()
+    live.stop()
+    try:
+        console.print(f"\n[bold]Current model:[/] {cfg.model}")
+        new = console.input("[bold cyan]New model[/] (empty = keep): ").strip()
+        if new:
+            cfg.model = new
+            state.add_event(f"[cyan]model → {new}[/]")
+        else:
+            state.add_event("[dim]model unchanged[/]")
+    except (KeyboardInterrupt, EOFError):
+        state.add_event("[dim]model edit cancelled[/]")
+    finally:
+        keyboard.set_cbreak()
+        live.start()
+
+
 # ── Renderer ──────────────────────────────────────────────────────────────────
 
 _PHASE_LABELS = {0: "Init", 1: "Architecture", 2: "Generation", 3: "Verification"}
@@ -105,12 +285,14 @@ _PHASE_LABELS = {0: "Init", 1: "Architecture", 2: "Generation", 3: "Verification
 _STATUS_STYLE = {
     "done": "green",
     "failed": "red",
+    "aborted": "yellow",
     "generating": "yellow",
     "pending": "dim",
     "starting": "cyan",
     "partial": "yellow",
     "success": "green",
     "planning": "cyan",
+    "paused": "yellow",
 }
 
 
@@ -139,15 +321,25 @@ def _render_header(state: DashboardState) -> Panel:
 
     task_preview = state.task[:80] + "…" if len(state.task) > 80 else state.task
     proj = f"[bold cyan]{state.project_name}[/]  " if state.project_name else ""
-    status_style = _STATUS_STYLE.get(state.pipeline_status.lower(), "white")
+    disp_status = "paused" if state.paused else state.pipeline_status
+    status_style = _STATUS_STYLE.get(disp_status.lower(), "white")
 
     t = Text()
     t.append(f"{proj}")
-    t.append(f"[{state.pipeline_status.upper()}]", style=f"bold {status_style}")
+    t.append(f"[{disp_status.upper()}]", style=f"bold {status_style}")
     t.append(f"  ⏱ {elapsed_str}", style="dim")
+
+    # Keyboard hints (only in live mode)
+    if not state.done:
+        if state.paused:
+            t.append("  │  [p] resume  [m/e/r/s] config  [q] abort", style="dim yellow")
+        elif state.abort_pending:
+            t.append("  │  [q] confirm abort  [any] cancel", style="bold red")
+        else:
+            t.append("  │  [p] pause  [q] abort", style="dim")
+
     t.append("\n")
     t.append(task_preview, style="italic dim")
-
     t.append("\n\n")
     t.append_text(_phase_bar(state))
 
@@ -184,7 +376,6 @@ def _render_slots(state: DashboardState) -> Panel:
     tok_text.append(f" {tok:,} tokens  ", style="bold")
     tok_text.append(f"~${cost:.4f}", style=cost_style)
 
-    from rich.console import Group
     return Panel(Group(tbl, tok_text), title="[bold]API SLOTS[/]", border_style="cyan", padding=(0, 1))
 
 
@@ -199,7 +390,6 @@ def _render_progress(state: DashboardState) -> Panel:
         total = len(state.files)
         pct = done / total if total else 0
 
-        # Mini progress bar
         bar_w = 24
         filled = int(bar_w * pct)
         bar = Text()
@@ -229,21 +419,44 @@ def _render_progress(state: DashboardState) -> Panel:
             elif f.status == "generating":
                 row.append("  …", style="yellow blink")
             elif f.status == "failed":
-                row.append(f"  ✗ exhausted", style="red dim")
+                row.append("  ✗ exhausted", style="red dim")
             lines.append(row)
 
-    from rich.console import Group
-    content = Group(*lines)
-    return Panel(content, title="[bold]PROGRESS[/]", border_style="green", padding=(0, 1))
+    return Panel(Group(*lines), title="[bold]PROGRESS[/]", border_style="green", padding=(0, 1))
 
 
 def _render_events(state: DashboardState) -> Panel:
-    from rich.console import Group
     lines = [Text.from_markup(e) for e in state.events]
     if not lines:
         lines = [Text("No events yet.", style="dim italic")]
-    content = Group(*lines)
-    return Panel(content, title="[bold]EVENTS[/]", border_style="dim", padding=(0, 1))
+    return Panel(Group(*lines), title="[bold]EVENTS[/]", border_style="dim", padding=(0, 1))
+
+
+def _render_pause_overlay(state: DashboardState, cfg: Any) -> Panel:
+    """Config panel shown when the pipeline is paused."""
+    grid = Table.grid(padding=(0, 2))
+    grid.add_column(style="bold cyan", min_width=3)
+    grid.add_column(style="dim", min_width=14)
+    grid.add_column(style="bold")
+
+    effort = _effort_label(cfg)
+    stream = "on" if cfg.stream_tokens else "off"
+
+    grid.add_row("m", "model", cfg.model)
+    grid.add_row("e", "effort", effort)
+    grid.add_row("r", "max repairs", str(cfg.max_repairs))
+    grid.add_row("s", "stream tokens", stream)
+
+    hint = Text("\n[p / Space] resume   [q / Esc] abort", style="dim")
+
+    if state.abort_pending:
+        title = "[bold red]⚠ Press q again to abort[/]"
+        border = "red"
+    else:
+        title = "[bold yellow]⏸ PAUSED — edit config[/]"
+        border = "yellow"
+
+    return Panel(Group(grid, hint), title=title, border_style=border, padding=(0, 2))
 
 
 def render(state: DashboardState) -> Layout:
@@ -312,6 +525,13 @@ class DashboardSubscriber:
                 s.done = True
                 s.final_status = data.get("status", "done")
 
+            elif name == "pipeline_paused":
+                s.paused = True
+                s.pipeline_status = "paused"
+
+            elif name == "pipeline_resumed":
+                s.paused = False
+
             elif name == "file_generated":
                 fname = data.get("file", "?")
                 st = data.get("status", "?")
@@ -334,10 +554,7 @@ class DashboardSubscriber:
 
             elif name == "agent_call":
                 agent = data.get("agent", "?")
-                model = data.get("model", "?")
-                if agent == "generator" or agent == "generator_json":
-                    # Mark file as generating
-                    file_hint = s.current_file
+                if agent in ("generator", "generator_json"):
                     for f in s.files:
                         if f.status == "pending":
                             f.status = "generating"
@@ -350,7 +567,6 @@ class DashboardSubscriber:
                 s.prompt_tokens += pt
                 s.completion_tokens += ct
                 s.total_calls += 1
-                # Update estimated cost (rough: $0.05/$0.08 per 1M for 8b)
                 s.estimated_cost_usd += (pt * 0.05 + ct * 0.08) / 1_000_000
                 slot_label = data.get("slot", "")
                 if slot_label:
@@ -359,16 +575,80 @@ class DashboardSubscriber:
             elif name == "llm_rate_limited":
                 slot = data.get("slot", "?")
                 retry = data.get("retry_after", 0)
-                attempt = data.get("attempt", 1)
                 s.update_slot(slot, available=False, cooldown_remaining=retry)
-                s.add_event(
-                    f"[yellow]⏸ Rate limit[/]  {slot}  cooldown {retry:.0f}s"
-                )
+                s.add_event(f"[yellow]⏸ Rate limit[/]  {slot}  cooldown {retry:.0f}s")
 
             elif name == "llm_retriable_error":
                 slot = data.get("slot", "?")
                 err = str(data.get("error", ""))[:60]
                 s.add_event(f"[red]⚠ Error[/]  {slot}  {err}")
+
+
+# ── Key handling ──────────────────────────────────────────────────────────────
+
+_ABORT_CONFIRM_TTL = 3.0   # seconds before abort confirmation expires
+
+
+def _handle_key(
+    ch: str,
+    state: DashboardState,
+    cfg: Any,
+    pause_event: threading.Event,
+    abort_event: threading.Event,
+    live: Live,
+    keyboard: KeyboardController,
+    console: Console,
+) -> None:
+    now = time.time()
+
+    # Cancel stale abort confirmation
+    if state.abort_pending and (now - state.abort_pending_at) > _ABORT_CONFIRM_TTL:
+        state.abort_pending = False
+        state.add_event("[dim]Abort cancelled (timeout)[/]")
+
+    if ch in ("p", " "):
+        if state.paused:
+            # Resume
+            state.paused = False
+            state.abort_pending = False
+            pause_event.clear()
+            state.add_event("[green]▶ Resumed[/]")
+        else:
+            # Pause
+            state.paused = True
+            pause_event.set()
+            state.add_event("[yellow]⏸ Paused  [p] resume  [m/e/r/s] config  [q] abort[/]")
+
+    elif ch in ("q", "\x1b", "\x03"):   # q, Esc, Ctrl+C
+        if state.abort_pending or state.paused:
+            # Confirmed abort
+            abort_event.set()
+            pause_event.clear()   # unblock orchestrator so it can check abort
+            state.abort_requested = True
+            state.abort_pending = False
+            state.add_event("[bold red]✗ Pipeline aborted by user[/]")
+        else:
+            # First press — request confirmation
+            state.abort_pending = True
+            state.abort_pending_at = now
+            state.add_event("[yellow]⚠ Press q again within 3 s to abort[/]")
+
+    elif state.paused:
+        # Config editing only while paused
+        if ch == "m":
+            _edit_model(live, keyboard, state, cfg, console)
+        elif ch == "e":
+            _cycle_effort(state, cfg)
+        elif ch == "r":
+            _cycle_max_repairs(state, cfg)
+        elif ch == "s":
+            cfg.stream_tokens = not cfg.stream_tokens
+            state.add_event(f"[cyan]stream_tokens → {cfg.stream_tokens}[/]")
+
+    elif state.abort_pending:
+        # Any key other than q/Esc cancels the confirmation
+        state.abort_pending = False
+        state.add_event("[dim]Abort cancelled[/]")
 
 
 # ── Main entry point ──────────────────────────────────────────────────────────
@@ -381,17 +661,25 @@ def run_with_dashboard(
 ) -> Dict[str, Any]:
     """Run the Matrioska pipeline with a live Rich dashboard.
 
-    Subscribes to the EventBus, refreshes the layout every 0.25s,
+    Subscribes to the EventBus, refreshes the layout every 0.1 s,
     and returns the full result dict when done.
+
+    Keyboard controls (requires a real TTY):
+      p / Space   pause / resume
+      q / Esc     abort (first press = confirm; second press within 3 s = abort)
+      m / e / r / s   config edits (model, effort, max_repairs, stream) — pause first
     """
-    from matrioska.pipeline.orchestrator import Matrioska
+    from matrioska.pipeline.orchestrator import Matrioska, PipelineAborted
     from matrioska.core.events import EventBus
 
     console = console or Console()
     state = DashboardState(task=task)
 
-    # Build orchestrator
-    m = Matrioska(cfg)
+    # Control events wired into the orchestrator
+    pause_event = threading.Event()
+    abort_event = threading.Event()
+
+    m = Matrioska(cfg, pause_event=pause_event, abort_event=abort_event)
 
     # Initialize slot states from the pool
     try:
@@ -406,11 +694,11 @@ def run_with_dashboard(
     except Exception:
         pass
 
-    # Subscribe dashboard to bus
+    # Subscribe dashboard to EventBus
     subscriber = DashboardSubscriber(state)
     m.bus.on("*", subscriber)
 
-    # Slot cooldown refresh thread (polls pool every 0.5s)
+    # Slot cooldown refresh thread (polls pool every 0.5 s)
     _stop_refresh = threading.Event()
 
     def _refresh_slots() -> None:
@@ -430,13 +718,18 @@ def run_with_dashboard(
     refresh_thread = threading.Thread(target=_refresh_slots, daemon=True)
     refresh_thread.start()
 
-    # Result container for thread communication
+    # Pipeline thread
     result_container: Dict[str, Any] = {}
     error_container: Dict[str, Any] = {}
 
     def _run_pipeline() -> None:
         try:
             result_container["result"] = m.run(task)
+        except PipelineAborted:
+            state.done = True
+            state.pipeline_status = "aborted"
+            state.final_status = "aborted"
+            state.add_event("[bold yellow]Pipeline stopped[/]")
         except Exception as exc:
             error_container["exc"] = exc
             state.done = True
@@ -446,48 +739,77 @@ def run_with_dashboard(
 
     pipeline_thread = threading.Thread(target=_run_pipeline, daemon=True)
 
-    # Live dashboard
-    with Live(
-        render(state),
-        console=console,
-        refresh_per_second=4,
-        screen=False,
-        vertical_overflow="visible",
-    ) as live:
-        pipeline_thread.start()
+    # Keyboard controller
+    keyboard = KeyboardController()
+    kb_active = keyboard.start()
 
-        while pipeline_thread.is_alive():
-            # Sync file list from architecture when available
-            if state.phase >= 2 and not state.files:
-                try:
-                    arch = m.graph.load_latest()
-                    if arch and arch.state.get("architecture"):
-                        for f in arch.state["architecture"].get("files", []):
-                            state.files.append(FileState(
-                                name=f"{f['name']}.{f['extension']}"
-                            ))
-                except Exception:
-                    pass
+    try:
+        with Live(
+            render(state),
+            console=console,
+            refresh_per_second=10,
+            screen=False,
+            vertical_overflow="visible",
+        ) as live:
+            pipeline_thread.start()
+
+            while pipeline_thread.is_alive():
+                # Keyboard input
+                if kb_active:
+                    while True:
+                        ch = keyboard.get()
+                        if ch is None:
+                            break
+                        _handle_key(
+                            ch, state, cfg,
+                            pause_event, abort_event,
+                            live, keyboard, console,
+                        )
+
+                # Architecture sync
+                if state.phase >= 2 and not state.files:
+                    try:
+                        arch = m.graph.load_latest()
+                        if arch and arch.state.get("architecture"):
+                            for f in arch.state["architecture"].get("files", []):
+                                state.files.append(FileState(
+                                    name=f"{f['name']}.{f['extension']}"
+                                ))
+                    except Exception:
+                        pass
+
+                # Render: show pause overlay when paused
+                if state.paused or state.abort_pending:
+                    live.update(Group(render(state), _render_pause_overlay(state, cfg)))
+                else:
+                    live.update(render(state))
+
+                time.sleep(0.1)
+
+            # Final render
+            state.done = True
+            if "result" in result_container:
+                r = result_container["result"]
+                state.final_status = r.get("status", "done")
+                state.pipeline_status = state.final_status
+                tok = r.get("tokens", {})
+                if tok:
+                    state.prompt_tokens = tok.get("prompt_tokens", state.prompt_tokens)
+                    state.completion_tokens = tok.get("completion_tokens", state.completion_tokens)
+                    state.estimated_cost_usd = tok.get("estimated_cost_usd", state.estimated_cost_usd)
 
             live.update(render(state))
-            time.sleep(0.25)
 
-        # Final render
-        state.done = True
-        if "result" in result_container:
-            r = result_container["result"]
-            state.final_status = r.get("status", "done")
-            state.pipeline_status = state.final_status
-            # Sync token totals from result
-            tok = r.get("tokens", {})
-            if tok:
-                state.prompt_tokens = tok.get("prompt_tokens", state.prompt_tokens)
-                state.completion_tokens = tok.get("completion_tokens", state.completion_tokens)
-                state.estimated_cost_usd = tok.get("estimated_cost_usd", state.estimated_cost_usd)
+    except KeyboardInterrupt:
+        abort_event.set()
+        pause_event.clear()
+        state.abort_requested = True
+    finally:
+        keyboard.stop()
+        _stop_refresh.set()
 
-        live.update(render(state))
-
-    _stop_refresh.set()
+    if state.final_status == "aborted":
+        return {"status": "aborted", "artifacts": [], "shared_state": {}}
 
     if "exc" in error_container:
         raise error_container["exc"]

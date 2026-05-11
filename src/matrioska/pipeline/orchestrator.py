@@ -42,6 +42,10 @@ from matrioska.pipeline.executor import install_missing_deps, write_artifacts_to
 logger = logging.getLogger("matrioska.orchestrator")
 
 
+class PipelineAborted(Exception):
+    """Raised when the user requests abort via dashboard or signal."""
+
+
 class Matrioska:
     """The Matrioska V3 orchestrator — modular monolith with event-driven core.
 
@@ -53,10 +57,20 @@ class Matrioska:
     3. Phase 3 — Verification (contract validation + sandbox execution)
     """
 
-    def __init__(self, cfg: Optional[Config] = None, *, depth: int = 0):
+    def __init__(
+        self,
+        cfg: Optional[Config] = None,
+        *,
+        depth: int = 0,
+        pause_event: Optional["threading.Event"] = None,
+        abort_event: Optional["threading.Event"] = None,
+    ):
+        import threading as _threading
         self.cfg = cfg or load_config()
         self.depth = depth
         self.work_dir = Path(self.cfg.work_dir)
+        self.pause_event: Optional[_threading.Event] = pause_event
+        self.abort_event: Optional[_threading.Event] = abort_event
         self.work_dir.mkdir(parents=True, exist_ok=True)
 
         # ── Event system ─────────────────────────────────────────────────
@@ -86,6 +100,21 @@ class Matrioska:
             self.llm = LLMClient(self.cfg, bus=self.bus)
         else:
             self.llm = None  # type: ignore
+
+    def _check_control(self) -> None:
+        """Honour pause/abort signals from the dashboard.
+
+        Called at phase boundaries. Blocks indefinitely while paused;
+        raises PipelineAborted immediately when abort is requested.
+        """
+        if self.abort_event and self.abort_event.is_set():
+            raise PipelineAborted("Pipeline aborted by user")
+        if self.pause_event and self.pause_event.is_set():
+            self._emit("pipeline_paused")
+            self.pause_event.wait()   # blocks until dashboard clears the event
+            if self.abort_event and self.abort_event.is_set():
+                raise PipelineAborted("Pipeline aborted while paused")
+            self._emit("pipeline_resumed")
 
     # ── Public API ───────────────────────────────────────────────────────
 
@@ -132,6 +161,8 @@ class Matrioska:
         if vault_hint:
             architect_ctx = (architect_ctx + "\n\n" + vault_hint).strip()
 
+        self._check_control()   # pre-Phase 1: abort before spending any tokens
+
         if not run_phase1(
             state, self.cfg, self.llm, self.episodic, self.procedural, self.bus,
             preflight_context=architect_ctx or None,
@@ -140,6 +171,7 @@ class Matrioska:
             return self._result(state, "failed")
 
         self.graph.save_checkpoint(label="after_architecture")
+        self._check_control()   # post-Phase 1: pause/abort before Generation
 
         if self.cfg.plan_only:
             logger.info("--plan_only: stopping after architecture")
@@ -154,6 +186,7 @@ class Matrioska:
         # ── Phase 2: Generation ────────────────────────────────────────
         gen_ok = run_phase2(state, self.cfg, self.llm, self.bus, self.depth)
         self.graph.save_checkpoint(label="after_generation")
+        self._check_control()   # post-Phase 2: pause/abort before Verification
 
         # ── Dep install + final disk write ─────────────────────────────
         write_artifacts_to_disk(state.artifacts, self.work_dir)
@@ -314,9 +347,11 @@ class Matrioska:
                     logger.warning("Rate limited during connectivity check — proceeding anyway")
                     return
                 if "organization_restricted" in msg or "account" in msg and "restrict" in msg:
+                    from urllib.parse import urlparse
+                    host = urlparse(spec.base_url).hostname or spec.base_url
                     raise RuntimeError(
-                        f"Provider account restricted ({spec.provider}). "
-                        f"Contact {spec.provider} support.\n  Error: {e}"
+                        f"Account restricted at {host}. "
+                        f"Contact provider support to unblock your organization.\n  Error: {e}"
                     ) from e
                 if "400" in msg or "bad request" in msg:
                     # 400 during a minimal probe may indicate a deprecated/renamed model
