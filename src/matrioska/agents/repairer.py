@@ -25,8 +25,9 @@ from typing import Any, Dict, List, Optional, Tuple
 from matrioska.core.config import Config, ModelSpec
 from matrioska.core.events import EventBus
 from matrioska.core.state import FileSpec
-from matrioska.core.text_utils import strip_fences
+from matrioska.core.text_utils import strip_fences, sanitize_output
 from matrioska.llm.client import LLMClient
+from matrioska.llm.circuit import is_small_model
 
 logger = logging.getLogger("matrioska.agents.repairer")
 
@@ -47,6 +48,24 @@ CRITICAL RULES:
 - If the error is a Python syntax error at line N, verify lines N-2 to N+2 carefully
 - If tool use is available, call `finish` with the corrected content
 """
+
+# ── Solução B: sistema compacto para modelos pequenos ────────────────────────
+#
+# Modelos 8b têm duas limitações que causam 413:
+#   1. Janela de contexto efetiva menor (o request HTTP cresce muito)
+#   2. O system prompt longo confunde o modelo sobre o formato de output
+#
+# Solução: system prompt de 1 linha + código truncado ao redor do erro.
+# Sem shared_state no prompt, sem DETAILS — só o essencial para corrigir.
+
+REPAIRER_SYSTEM_COMPACT = (
+    "Fix the broken code. Return ONLY the corrected complete file, no explanation, no fences."
+)
+
+# Máximo de chars do arquivo inteiro antes de truncar para repair compacto
+_COMPACT_CONTENT_LIMIT = 2500
+# Linhas de contexto ao redor do erro no modo compacto
+_COMPACT_CONTEXT_LINES = 20
 
 REPAIRER_SYSTEM_ACI = """You are Matrioska Repairer (ACI mode). Fix ONLY the broken parts of a file.
 
@@ -111,6 +130,13 @@ class RepairerAgent:
         if test_failures:
             all_errors += [f"[test] {f}" for f in test_failures]
 
+        ms = self.cfg.effective_repairer
+
+        # Solução B: modelos pequenos usam modo compacto para evitar 413
+        if is_small_model(ms.model):
+            logger.debug("Small model (%s) — compact repair mode", ms.model)
+            return self._compact_repair(spec, previous_content, all_errors)
+
         if self.cfg.use_aci_repair and self._has_line_errors(all_errors):
             patched = self._aci_repair(spec, previous_content, all_errors, shared_context)
             if patched:
@@ -118,6 +144,57 @@ class RepairerAgent:
             logger.info("ACI repair produced no hunks for %s — falling back to full-file", spec.filename)
 
         return self._full_repair(spec, previous_content, all_errors, shared_context)
+
+    # ── Compact repair (Solução B) ────────────────────────────────────────
+
+    def _compact_repair(
+        self,
+        spec: FileSpec,
+        content: str,
+        errors: List[str],
+    ) -> str:
+        """Minimal-context repair for small models.
+
+        Sends only: error summary + code snippet around the error line.
+        No shared_state, no DETAILS, no long system prompt.
+        Prevents 413 Payload Too Large and model confusion.
+        """
+        ms = self.cfg.effective_repairer
+        error_summary = "; ".join(e[:120] for e in errors[:3])
+        snippet = _extract_error_context(content, errors, _COMPACT_CONTEXT_LINES)
+
+        # If the snippet covers the whole file already, and it's still small, use it
+        prompt = (
+            f"Language: {spec.extension}\n"
+            f"Error: {error_summary}\n\n"
+            f"Code:\n{snippet}\n\n"
+            f"Return ONLY the complete corrected file content."
+        )
+
+        self._emit("agent_call", agent="repairer_compact", model=ms.model)
+        t0 = time.time()
+
+        try:
+            resp = self.llm.chat(
+                messages=[{"role": "user", "content": prompt}],
+                model_spec=ms,
+                system=REPAIRER_SYSTEM_COMPACT,
+            )
+        except Exception as e:
+            logger.error("Compact repair failed for %s: %s", spec.filename, e)
+            return ""
+
+        self._emit(
+            "agent_done",
+            agent="repairer_compact",
+            elapsed_s=round(time.time() - t0, 2),
+            prompt_tokens=resp.prompt_tokens,
+            completion_tokens=resp.completion_tokens,
+        )
+
+        result = sanitize_output(resp.text)
+        logger.info("Compact repair: %d chars for %s", len(result), spec.filename)
+        return result
 
     # ── ACI mode ──────────────────────────────────────────────────────────
 
@@ -250,6 +327,39 @@ class RepairerAgent:
 
 
 # ── Patch helpers ─────────────────────────────────────────────────────────────
+
+
+def _extract_error_context(
+    content: str, errors: List[str], context_lines: int = 20
+) -> str:
+    """Return the code snippet most relevant to the errors.
+
+    If the errors reference specific line numbers, returns those lines ±
+    context_lines.  Otherwise returns the whole content (truncated to
+    _COMPACT_CONTENT_LIMIT chars) so the model has enough to work with.
+    """
+    lines = content.splitlines()
+
+    error_line_nums: List[int] = []
+    for err in errors:
+        m = re.search(r'line\s+(\d+)', err, re.IGNORECASE)
+        if m:
+            error_line_nums.append(int(m.group(1)) - 1)  # 0-indexed
+
+    if not error_line_nums:
+        # No line reference — truncate whole content
+        if len(content) <= _COMPACT_CONTENT_LIMIT:
+            return _number_lines(content)
+        return _number_lines(content[: _COMPACT_CONTENT_LIMIT]) + "\n... (truncated)"
+
+    center = error_line_nums[0]
+    start = max(0, center - context_lines)
+    end = min(len(lines), center + context_lines + 1)
+
+    width = len(str(end))
+    snippet_lines = [f"{i + 1:{width}}| {lines[i]}" for i in range(start, end)]
+    header = f"(lines {start + 1}–{end} of {len(lines)} total)\n"
+    return header + "\n".join(snippet_lines)
 
 
 def _number_lines(content: str) -> str:

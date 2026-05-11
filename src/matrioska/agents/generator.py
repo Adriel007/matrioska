@@ -12,6 +12,7 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 import time
 import uuid
 from typing import Any, Dict, List, Optional, Tuple
@@ -21,7 +22,7 @@ from matrioska.core.events import EventBus
 from matrioska.core.state import FileArtifact, FileSpec
 from matrioska.core.text_utils import strip_fences
 from matrioska.llm.client import LLMClient, STD_TOOLS, ChatResponse
-from matrioska.llm.circuit import route_model_for_extension
+from matrioska.llm.circuit import route_model_for_extension, is_small_model
 
 logger = logging.getLogger("matrioska.agents.generator")
 
@@ -55,6 +56,46 @@ Emit keys that answer "what would a downstream file need to know to use this fil
 """
 
 SHARED_STATE_MARKER = "SHARED_STATE_UPDATE:"
+
+# ── Solução A: JSON mode para modelos pequenos ────────────────────────────────
+#
+# Modelos pequenos (8b, instant, mini…) falham em usar o protocolo de tool
+# calling corretamente: escrevem finish() como texto, adicionam fences, etc.
+# A solução: pedir ao modelo para retornar JSON puro com schema fixo, sem
+# mencionar tools. Isso é muito mais confiável para modelos com instruction-
+# following fraco (XGrammar MLSys 2025, OpenAI Structured Outputs).
+
+GENERATOR_SYSTEM_JSON = """You are a code generator. Your only job is to write complete, correct code.
+
+Return a JSON object with EXACTLY these two keys:
+  "content": the complete file content as a plain string (no markdown fences, no explanation)
+  "shared_state_updates": an object with the state keys you must emit (see WRITES below)
+
+Rules for "content":
+- Complete file, no ellipsis, no "# TODO: continue"
+- No ``` fences, no language markers — pure code only
+- Syntactically valid {ext} code
+
+Rules for "shared_state_updates":
+- Include every WRITES key listed below with concrete values
+- Examples: class names, route paths, DB schema, config values, module names
+
+{project_memory_section}
+"""
+
+# JSON schema que o provider valida — garante que o output é parseável
+JSON_GEN_SCHEMA = {
+    "type": "object",
+    "properties": {
+        "content": {"type": "string"},
+        "shared_state_updates": {
+            "type": "object",
+            "additionalProperties": True,
+        },
+    },
+    "required": ["content"],
+    "additionalProperties": False,
+}
 
 
 class GeneratorAgent:
@@ -126,6 +167,13 @@ class GeneratorAgent:
         ):
             return self._debate_generate(spec, shared_context, model_spec, system)
 
+        # Solução A: small models use JSON schema mode instead of tool calling
+        if is_small_model(model_spec.model):
+            logger.debug(
+                "Small model detected (%s) — using JSON schema mode", model_spec.model
+            )
+            return self._json_generate(spec, shared_context, model_spec, previous_error)
+
         # Enable tools for OpenAI-compat providers (Groq, OpenRouter, NVIDIA, etc.)
         # The client auto-falls back if tools are rejected (HTTP 400).
         gen_spec_for_tools = model_spec  # noqa: alias for clarity
@@ -138,6 +186,103 @@ class GeneratorAgent:
             spec, shared_context, model_spec, system, previous_error,
             force_tools=use_native_tools,
         )
+
+    # ── JSON mode (Solução A) ────────────────────────────────────────────
+
+    def _json_generate(
+        self,
+        spec: FileSpec,
+        shared_context: Dict[str, Any],
+        model_spec: ModelSpec,
+        error_hint: str = "",
+    ) -> Tuple[str, Dict[str, Any]]:
+        """Generate via JSON schema — no tool calling required.
+
+        One-shot: the model returns {"content": "...", "shared_state_updates": {...}}.
+        Falls back to plain-text extraction if JSON parsing fails.
+        """
+        proj_mem = ""
+        try:
+            from matrioska.memory.procedural import ProceduralMemory
+            mem = ProceduralMemory(self.cfg.work_dir).read_project_memory()
+            if mem:
+                proj_mem = f"\nPROJECT MEMORY:\n{mem}\n"
+        except Exception:
+            pass
+
+        system = GENERATOR_SYSTEM_JSON.replace(
+            "{project_memory_section}", proj_mem
+        ).replace("{ext}", spec.extension)
+
+        user_prompt = self._build_json_user_prompt(spec, shared_context, error_hint)
+
+        self._emit("agent_call", agent="generator_json", model=model_spec.model)
+        t0 = time.time()
+
+        try:
+            resp = self.llm.chat(
+                messages=[{"role": "user", "content": user_prompt}],
+                model_spec=model_spec,
+                system=system,
+                json_schema=JSON_GEN_SCHEMA,
+            )
+        except Exception:
+            # json_schema rejected → retry with plain json_mode
+            try:
+                resp = self.llm.chat(
+                    messages=[{"role": "user", "content": user_prompt}],
+                    model_spec=model_spec,
+                    system=system,
+                    json_mode=True,
+                )
+            except Exception as e:
+                logger.error("JSON generate failed for %s: %s", spec.filename, e)
+                return "", {}
+
+        self._emit(
+            "agent_done",
+            agent="generator_json",
+            model=model_spec.model,
+            prompt_tokens=resp.prompt_tokens,
+            completion_tokens=resp.completion_tokens,
+            elapsed_s=round(time.time() - t0, 2),
+        )
+
+        return _parse_json_response(resp.text)
+
+    def _build_json_user_prompt(
+        self, spec: FileSpec, context: Dict[str, Any], error_hint: str = ""
+    ) -> str:
+        writes_block = ""
+        if spec.shared_state_writes:
+            writes_block = (
+                "\n\nWRITES (you MUST include these in shared_state_updates):\n"
+                + "\n".join(f"  - {k}" for k in spec.shared_state_writes)
+            )
+
+        context_block = ""
+        if context:
+            items = "\n".join(
+                f"  {k}: {json.dumps(v, ensure_ascii=False)}"
+                for k, v in context.items()
+                if not str(k).startswith("_")
+            )
+            context_block = f"\n\nAVAILABLE STATE:\n{items}"
+
+        prompt = (
+            f"FILE: {spec.name}.{spec.extension}\n\n"
+            f"DESCRIPTION:\n{spec.content}\n\n"
+            f"REQUIREMENTS:\n{spec.details}"
+            f"{context_block}"
+            f"{writes_block}\n\n"
+            f"Return JSON: {{\"content\": \"<complete {spec.extension} code>\", "
+            f"\"shared_state_updates\": {{...}}}}"
+        )
+
+        if error_hint:
+            prompt += f"\n\nFIX THIS ERROR FROM PREVIOUS ATTEMPT:\n{error_hint}"
+
+        return prompt
 
     # ── Single generation ────────────────────────────────────────────────
 
@@ -350,6 +495,40 @@ class GeneratorAgent:
         if self.bus:
             self.bus.emit_named(name, **data)
 
+
+
+def _parse_json_response(text: str) -> Tuple[str, Dict[str, Any]]:
+    """Parse {"content": "...", "shared_state_updates": {...}} from model JSON output."""
+    from matrioska.core.text_utils import sanitize_output
+
+    raw = text.strip()
+    # The model may wrap even JSON in fences sometimes
+    if raw.startswith("```"):
+        raw = re.sub(r'^```[a-zA-Z0-9_.\-]*\n?', '', raw)
+        raw = re.sub(r'\n?```[^\n]*$', '', raw).strip()
+
+    parsed: Dict[str, Any] = {}
+    try:
+        parsed = json.loads(raw)
+    except Exception:
+        try:
+            from json_repair import repair_json
+            parsed = json.loads(repair_json(raw))
+        except Exception:
+            # Last resort: treat the whole text as content
+            return sanitize_output(text), {}
+
+    if not isinstance(parsed, dict):
+        return sanitize_output(text), {}
+
+    content = str(parsed.get("content", ""))
+    # The model sometimes nests fences inside the JSON string value
+    content = sanitize_output(content)
+    updates = parsed.get("shared_state_updates", {})
+    if not isinstance(updates, dict):
+        updates = {}
+
+    return content, updates
 
 
 def _extract_from_text(text: str) -> Tuple[str, Dict[str, Any]]:

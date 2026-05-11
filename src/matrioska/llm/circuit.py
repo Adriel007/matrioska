@@ -309,6 +309,23 @@ def parse_retry_after(response_headers: Dict[str, str], body_text: str = "") -> 
     return 60.0
 
 
+# ── Small-model detection ─────────────────────────────────────────────────────
+
+# Models that are known to struggle with OpenAI-style function/tool calling.
+# For these, the generator falls back to JSON-schema mode (Solução A).
+_SMALL_MODEL_PATTERNS = (
+    "8b", "instant", "mini", "e2b", "e4b",
+    "small", "lite", "1b", "3b", "1.5b",
+    "flash", "nano", "phi-",
+)
+
+
+def is_small_model(model: str) -> bool:
+    """True if the model name suggests limited instruction-following for tool use."""
+    m = model.lower()
+    return any(p in m for p in _SMALL_MODEL_PATTERNS)
+
+
 # ── MoE-style routing by file extension ──────────────────────────────────────
 
 
