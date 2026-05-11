@@ -142,6 +142,47 @@
   baselines. Load baselines from a JSON file so each CI run updates them,
   tracking improvement (or regression) over time.
 
+## Claude Code-inspired Features
+
+Diferenciais do Claude Code que a Matrioska não tem e valem implementar:
+
+- [ ] **Real code execution feedback loop** — O diferencial central: Claude Code executa
+  o código gerado, captura stdout/stderr, e usa o erro real como sinal de repair.
+  A Matrioska só valida sintaxe (AST parse). Wiring: ao final de cada arquivo gerado,
+  rodar em subprocess com timeout; se exitcode != 0, passar stderr para o Repairer como
+  `test_failures`. Isso elimina a necessidade do TestDesigner para validação funcional.
+
+- [ ] **Codebase pre-flight** — Claude Code lê o projeto existente antes de começar.
+  A Matrioska começa cega. Adicionar uma fase 0 que lê `work_dir` e injeta arquivos
+  existentes no shared_state: nomes, assinaturas de função, schemas de DB.
+  Crítico para tarefas de incremento (add feature, fix bug) onde o projeto já existe.
+
+- [ ] **Surgical file editing (diff-based)** — Claude Code edita linhas específicas com
+  Edit/Write. A Matrioska regenera o arquivo inteiro. O ACI repair vai na direção certa
+  mas só é ativado no repair loop. Estender para: se o arquivo já existe em work_dir,
+  gerar um diff-patch em vez de arquivo completo.
+
+- [ ] **Real dependency installation** — Claude Code pode rodar `pip install`, `npm i`,
+  `go get`. A Matrioska gera código mas não instala deps. Adicionar um Phase 3.5 que
+  lê os `import` dos arquivos gerados, detecta pacotes não-stdlib, e roda `pip install`
+  antes de executar os testes. Requer sandbox ou venv isolado.
+
+- [ ] **CLAUDE.md / project context injection** — Claude Code lê CLAUDE.md para
+  entender convenções do projeto. Adicionar suporte a um arquivo `MATRIOSKA.md` (ou
+  ler o CLAUDE.md se presente) e injetar no system prompt do Architect. Permite ao
+  usuário definir: linguagem preferida, padrões de código, restrições de deps.
+
+- [ ] **Incremental task mode** — Claude Code trata "add feature X" diferente de
+  "build from scratch". A Matrioska sempre recomeça do zero. Adicionar modo
+  `--task-type=increment` que: (1) lê arquivos existentes, (2) passa para o Architect
+  como contexto, (3) gera apenas os arquivos que precisam mudar. Diferença entre
+  phase1 atual e phase1 com diff-awareness.
+
+- [ ] **Streaming output / live progress** — Claude Code mostra o código sendo gerado
+  em tempo real. A Matrioska é silenciosa (só logs). Adicionar streaming opcional:
+  ao receber tokens do LLM, emitir via EventBus linha a linha. Útil para UX e para
+  detectar quando o modelo está divagando antes de completar o arquivo.
+
 ## Observability
 
 - [ ] **OpenTelemetry instrumentation** — `otel_endpoint` config exists but nothing
