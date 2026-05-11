@@ -107,51 +107,43 @@ passo de ser um vault Obsidian nativo.
 └── MATRIOSKA.md                   ← ProceduralMemory (já funciona)
 ```
 
-- [ ] **Vault global em `~/.matrioska/vault/`** — diretório único compartilhado entre
-  todos os projetos Matrioska. Compatível nativamente com Obsidian (Markdown + YAML
-  frontmatter + wikilinks `[[NomeDoArquivo]]`). Após cada run, extrair conceitos,
-  padrões e bugs e fazer upsert nas notas relevantes do vault global.
-  Inspiração: Karpathy LLM Wiki — "compilar em vez de re-derivar".
+- [x] **Vault global em `~/.matrioska/vault/`** — `memory/vault.py::GlobalVault`.
+  Diretório `~/.matrioska/vault/` (override via `MATRIOSKA_VAULT_DIR`/`--vault-dir`)
+  com layout Obsidian: `projects/<name>/{architecture,patterns,lessons,links}.md`,
+  `concepts/<tag>.md`, `bugs/<slug>.md`, `INDEX.md` auto-gerado. YAML frontmatter
+  + wikilinks `[[note]]`. Após cada run, `orchestrator._compile_into_vault()` faz
+  upsert idempotente (não duplica concept entries no mesmo timestamp).
 
-- [ ] **Knowledge compiler (LLM Wiki pattern)** — após cada run bem-sucedido, um agente
-  "compiler" lê os artefatos gerados + erros encontrados e produz/atualiza notas no
-  vault global: (1) identifica qual conceito foi usado (ex: "SQLite", "argparse"),
-  (2) extrai padrões ("usa AUTOINCREMENT", "separa DB logic em módulo próprio"),
-  (3) extrai bugs ("modelo 8b esquece fechar conexão SQLite"), (4) faz merge com a
-  nota existente — nunca substitui, apenas enriquece. Abordagem: LLM small/fast
-  gera diff da nota, outro LLM faz merge inteligente.
+- [x] **Knowledge compiler (LLM Wiki pattern)** — implementação determinística (sem
+  LLM extra). `compile_from_run()`: (1) `derive_tags()` infere concepts do task +
+  extensões, (2) `extract_lessons_and_bugs()` lê `repair_count > 0` (lesson) e
+  `status == "failed"` (bug), (3) upsert por seção via markers HTML
+  (`<!-- section:ID -->`) com modos `append` / `overwrite` / `append_dedup`.
+  Stub para futura camada LLM merge — basta substituir `_extract_patterns`.
 
-- [ ] **Dual-level retrieval (LightRAG style)** — implementar dois escopos de busca
-  distintos, configuráveis por query:
-  - **Local**: busca apenas no vault do projeto atual (`./matrioska_work/knowledge/`)
-  - **Global**: busca em conceitos transversais (`~/.matrioska/vault/concepts/` + bugs)
-  - **Cross-project**: atravessa wikilinks para encontrar projetos com padrões similares
-    (ex: "que outros projetos usaram SQLite + argparse?")
-  Retrieval: BM25 keyword + ChromaDB embeddings + graph traversal por wikilinks.
-  Fusão via RRF (Reciprocal Rank Fusion) — mesmo approach que atinge 95.2% no
-  LongMemEval-S (agentmemory, 2025).
+- [x] **Dual-level retrieval (LightRAG style)** — `GlobalVault.search(query, scope=...)`
+  com 4 escopos: `local` (knowledge/runs do projeto atual), `global`
+  (concepts + bugs cross-project), `linked` (BFS sobre wikilinks em `links.md`,
+  `max_hops=2`), `all`. Ranking: tokens query × {3.0×title + 2.0×tags + 1.0×body}.
+  ChromaDB pluggable como re-ranker (não obrigatório).
 
-- [ ] **Context scoping por query** — flag `--scope local|global|linked|all`:
-  - `local`  — só memória do projeto atual (default, mais barato)
-  - `global` — conceitos e padrões globais sem cruzar projetos específicos
-  - `linked` — projeto atual + projetos que o usuário marcou como relacionados
-  - `all`    — vault inteiro (para queries de "o que aprendi sobre SQLite em geral?")
-  O Architect recebe o contexto filtrado pelo scope, evitando ruído de projetos
-  não relacionados. Granularidade: projeto → módulo → conceito → bug.
+- [x] **Context scoping por query** — CLI: `matrioska vault search <query> --scope
+  {local,global,linked,all}`. Internamente, o orchestrator chama
+  `_retrieve_vault_context(task)` com scope=global antes de Phase 1, injetando
+  "RELEVANT VAULT KNOWLEDGE" no system prompt do Architect.
 
-- [ ] **Cross-project links (wikilinks + grafo)** — o usuário pode marcar projetos
-  como relacionados via `[[projeto_b]]` em `links.md` do projeto A, ou via
-  `matrioska link projeto_a projeto_b --reason "mesma stack FastAPI+SQLite"`.
-  Quando scope=linked, o retrieval atravessa esses links com BFS limitado a `max_hops`
-  (default 2). Dual-level: fine-grained local + high-level global (LightRAG arXiv 2409.14813).
+- [x] **Cross-project links (wikilinks + grafo)** — `links.md` por projeto contém
+  `[[projeto_b]]` wikilinks. `_linked_projects()` faz BFS bounded para scope=linked.
+  `matrioska vault graph` exporta Mermaid flowchart de todos os wikilinks
+  (compatível com qualquer viewer Markdown ou Obsidian Graph View).
 
-- [ ] **MCP server para o vault** — expor o vault da Matrioska como MCP server para
-  que outros agentes (Claude Code, Cursor, Windsurf) possam ler/escrever a memória.
-  Ferramentas MCP: `search_vault(query, scope, project?)`, `get_note(path)`,
-  `list_project_notes(project)`, `find_related(project, max_hops)`,
-  `upsert_concept(name, content)`. Implementar com `mcp` library (já dep opcional).
-  Referência: engraph (engraph GitHub), MCPVault (bitbonsai GitHub),
-  obsidian-mcp (lstpsche GitHub).
+- [x] **MCP server para o vault** — `api.py::create_mcp_server` agora registra
+  ferramentas read-side do vault em adição aos pipeline tools: `vault_search`
+  (com scope local|global|linked|all), `vault_get`, `vault_list`, `vault_doctor`,
+  `vault_graph`, `vault_related`. Writes intencionalmente não expostos — a
+  única forma de escrever no vault é via `orchestrator._compile_into_vault`
+  após uma run real (mantém o vault como derivada deterministicamente).
+  Tool descriptors em `MCP_TOOLS` para listagem por clients.
 
 - [ ] **Drill-down interativo no REPL** — no REPL (`matrioska`), comandos de navegação
   no vault: `/vault search <query>` busca em todos os escopos e mostra ranking,
@@ -159,17 +151,23 @@ passo de ser um vault Obsidian nativo.
   do conceito, `/vault related <projeto>` lista projetos com wikilinks comuns.
   Resultado renderizado com Rich — links clicáveis no terminal (Cmd+Click).
 
-- [ ] **Vault health & graph visualization** — `matrioska vault doctor` detecta notas
-  órfãs (sem wikilinks), conceitos stale (último update > 30 dias sem uso),
-  projetos sem lessons.md. `matrioska vault graph` exporta o grafo de wikilinks como
-  DOT/Mermaid para visualização. Alternativa: abrir diretamente no Obsidian — o vault
-  já é compatível nativamente com o Graph View do Obsidian.
+- [x] **Vault health & graph visualization** — `matrioska vault doctor` reporta
+  total de notas, projetos, concepts, bugs, orphans (notas sem links in/out fora
+  de pastas de projeto), stale (> 30 dias via frontmatter `updated`), broken_links
+  (wikilinks que apontam para notas inexistentes). Status: `healthy` ou
+  `issues_found`. `matrioska vault graph -o graph.md` exporta Mermaid flowchart.
 
 ### Outros itens de Memory
 
-- [ ] **DSPy compilation loop** — `ProceduralMemory` is a scaffold. Wire up the
-  golden task suite as a DSPy training set: generate → evaluate → compile prompt
-  → repeat until `first_pass_rate ≥ 80%`.
+- [x] **DSPy compilation loop** — `eval/dspy_compiler.py`. Scaffold completo:
+  `compile_target(target, category, max_tasks, val_fraction)` separa golden
+  tasks em train/val, roda baseline, e se DSPy estiver instalado executa
+  `BootstrapFewShot` com `golden_metric` (binary 0/1 via `evaluate_result`)
+  como objetivo. Demos extraídos e persistidos em `~/.matrioska/dspy_compiled/
+  {target}_demos.json`. Quando `dspy` não está instalado, retorna baseline
+  com `skipped_reason='dspy_not_installed'`. CLI: `matrioska compile --target
+  architect --category cli --max-tasks 5`. Faltando: integrar demos compilados
+  no `ArchitectAgent` (hot-swap do system prompt) — TBD.
 
 - [ ] **GraphRAG auto-ingest** — Semantic memory tracks concepts and relationships
   but doesn't auto-extract them from run artifacts. Add LLM-based entity extraction
@@ -184,36 +182,36 @@ passo de ser um vault Obsidian nativo.
 *Executar `matrioska` sem subcomando abre um REPL interativo — prompt simples de
 conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.*
 
-- [ ] **REPL interativo** — `matrioska` sem args abre um loop de pergunta-resposta
-  com o orquestrador como agente. Suporte a multiline (`\`+Enter), histórico de
-  comandos (↑/↓), Ctrl+C para cancelar geração, Ctrl+D para sair. Usar `prompt_toolkit`
-  ou `readline` para edição de linha rica.
+- [x] **REPL interativo** — `cli/repl.py`. `matrioska` sem args abre prompt
+  `matrioska › ` com prompt_toolkit (histórico em `~/.matrioska/history`,
+  Ctrl+D sai, Ctrl+C cancela task em andamento), fallback `input()` quando
+  prompt_toolkit ausente ou stdin não-TTY. Texto livre → `Matrioska(cfg).run(task)`
+  em thread separada, com integração de streaming opcional.
 
-- [ ] **Slash commands no REPL** — Dispatcher de `/comando` no REPL:
-  - `/model [nome]`     — trocar modelo mid-session; sem args mostra picker interativo
-  - `/config`           — exibir config atual (provider, model, flags, work_dir)
-  - `/usage`            — tokens usados na sessão, custo estimado, rate limit status por slot
-  - `/context`          — tamanho do contexto atual vs. limite do modelo
-  - `/clear`            — nova sessão, mantém memória do projeto
-  - `/plan`             — ativa plan mode (Architect planeja, não gera)
-  - `/memory`           — ver e editar MATRIOSKA.md + auto-memory persistente
-  - `/init`             — gerar MATRIOSKA.md para o projeto atual com scaffold
-  - `/review`           — code review read-only dos últimos artefatos gerados
-  - `/diff`             — o que mudou nesta sessão (artefatos gerados vs. existentes)
-  - `/compact`          — comprimir histórico de conversa (manter só resumo)
-  - `/slots`            — status do SlotPool em tempo real (disponível/cooldown)
-  - `/help`             — listar todos os comandos disponíveis
+- [x] **Slash commands no REPL** — registry via decorator `@command("name", "help")`.
+  Implementados: `/help`, `/quit`, `/exit`, `/config`, `/model [name]`, `/usage`,
+  `/clear`, `/plan`, `/effort {low,medium,high}`, `/memory`, `/init`, `/diff`,
+  `/slots`, `/btw <q>`, `/vault [list|search|doctor|graph]`, `/stream`, `/history`.
 
-- [ ] **`!` prefix para shell** — no REPL, `!ls -la` executa o comando e injeta o
-  output no contexto do agente. Permite inspecionar o projeto sem sair do REPL.
+- [x] **`!` prefix para shell** — `!<cmd>` no REPL roda `subprocess.run(..., shell=True,
+  timeout=60)` e imprime stdout/stderr inline com a sessão. Exit code não-zero
+  é exibido em dim.
 
-- [ ] **Effort levels** — `/effort low|medium|high` (ou `--effort` no CLI) controla
-  o quanto o Architect "pensa": low=1 candidato sem ToT, medium=3 candidatos,
-  high=5 candidatos + Judge + Reflexion completo.
+- [x] **Effort levels** — `/effort {low,medium,high}` no REPL. low=1 candidate,
+  no ToT/Reflexion/TestDesign; medium=default cfg; high=5 candidates + ToT
+  + Reflexion + TestDesign. Aplicado via `_effective_cfg_for_run()` (não
+  mutila a Config base, retorna uma cópia).
 
-- [ ] **Plan mode interativo** — `/plan` no REPL entra em modo onde o agente só planeja
-  (mostra arquitetura proposta) e aguarda aprovação antes de gerar. `y` executa,
-  `n` cancela, `e` edita o plano antes de executar.
+- [x] **Plan mode interativo** — `matrioska run --interactive` mostra a arquitetura
+  proposta após Phase 1 e pergunta `[Y/n/q]` antes de prosseguir para Phase 2.
+  Quando `--mode plan`, retorna logo após Phase 1 sem prompt. Dashboard é
+  desabilitado automaticamente quando o flow precisa de stdin.
+
+- [ ] **REPL autocompletion & keyboard navigation** — Auto-complete `/` slash commands
+  in the REPL with history-aware suggestions. Support arrow keys, ENTER, and TAB for
+  navigation and selection in the completions menu. Integrate with prompt_toolkit's
+  `FuzzyCompleter` and `NestedCompleter`. Allow TAB to cycle through suggestions,
+  ENTER to select, arrow keys to browse, and Esc to dismiss.
 
 - [ ] **Rewind / checkpoint** — no REPL, `Esc+Esc` ou `/rewind` volta ao último
   checkpoint salvo (desfaz geração da última rodada). StateGraph já tem checkpoints —
@@ -223,19 +221,22 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   `/meu-cmd` como slash command no REPL. Conteúdo do arquivo vira prompt injetado.
   Permite criar workflows reutilizáveis por projeto.
 
-- [ ] **`/btw` — pergunta rápida sem histórico** — `/btw o que faz esse arquivo?`
-  faz um call ao LLM sem adicionar a pergunta/resposta ao contexto da sessão.
-  Útil para consultas pontuais que não devem "poluir" o contexto da task.
+- [x] **`/btw` — pergunta rápida sem histórico** — `matrioska btw "<question>"`
+  faz one-shot ao LLM com system prompt "concise technical assistant, 1-5 sentences"
+  e renderiza a resposta como Markdown via Rich. Sem episodic note, sem vault write,
+  sem pipeline. Quando o REPL existir, vira `/btw <question>` (mesma rota).
 
 - [ ] **Hook system** — `.matrioska/hooks/` com scripts shell executados em eventos:
   `pre_generate` (antes de gerar um arquivo), `post_generate` (após geração),
   `pre_repair` (antes de repair), `session_start`, `session_end`. Scripts recebem
   JSON via stdin com contexto do evento.
 
-- [ ] **Permission modes** — `--mode auto|plan|ask` controla nível de autonomia:
-  `ask`=aprova cada arquivo antes de gerar (default), `plan`=só planeja,
-  `auto`=gera tudo sem perguntar. Equivalente ao `acceptEdits`/`bypassPermissions`
-  do Claude Code.
+- [x] **Permission modes** — `--mode auto|plan|ask`:
+  - `auto` (default) — gera tudo sem perguntar
+  - `plan` — força `plan_only`, retorna após Phase 1
+  - `ask` — em Phase 2, antes de cada layer, prompt `[Y/n/s/q]` por arquivo
+    (skip cria placeholder em `shared_state` para downstream não quebrar).
+  Dashboard auto-desabilitado em `ask`. Quit aborta com exit 130.
 
 ## CLI & DX
 
@@ -243,8 +244,10 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   com cooldowns em tempo real, progress bar de arquivos, tokens/custo, log de eventos.
   `matrioska run` usa dashboard por default; `--no-dashboard` para logs simples.
 
-- [ ] **`--quick` mode** — Skips ToT, reflexion, contract validation in Phase 2,
-  and Phase 3 entirely. Useful for rapid iteration during development.
+- [x] **`--quick` mode** — `cfg.quick=True` colapsa: `enable_tot=False`,
+  `enable_reflexion=False`, `enable_test_design=False`, `architect_candidates=1`,
+  `max_repairs=1`, skip Phase 3. Respeita overrides explícitos via CLI/env
+  (não sobrescreve flags que o usuário setou diretamente).
 
 - [ ] **Model validation on startup** — When `--dry-run` is not set, validate that
   the configured model(s) exist on the provider before spending tokens.
@@ -255,8 +258,11 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   429 → "Wait for rate limit reset or switch provider". Both in the LLM
   client retry loop and the startup connectivity check.
 
-- [ ] **`matrioska init`** — Scaffold a `.env` with interactive prompts for
-  provider, API key, and model selection.
+- [x] **`matrioska init`** — `cli/init_wizard.py`. Wizard interativo: pick
+  provider (10 opções: openai/anthropic/groq/openrouter/deepseek/xai/mistral/
+  together/nvidia/ollama), base_url, api_key, model, per-role overrides opcionais,
+  multi-key rotation opcional. Detecta `.env` existente e oferece merge/overwrite/
+  abort. Gera `.env` agrupado por seções comentadas + opcional `MATRIOSKA.md` scaffold.
 
 ## MCP Server & API
 
@@ -336,10 +342,12 @@ Diferenciais do Claude Code que a Matrioska não tem e valem implementar:
   arquivo existente no Generator). O Architect recebe o codebase atual e pode decidir
   gerar apenas os arquivos que precisam mudar.
 
-- [ ] **Streaming output / live progress** — Claude Code mostra o código sendo gerado
-  em tempo real. A Matrioska é silenciosa (só logs). Adicionar streaming opcional:
-  ao receber tokens do LLM, emitir via EventBus linha a linha. Útil para UX e para
-  detectar quando o modelo está divagando antes de completar o arquivo.
+- [x] **Streaming output / live progress** — Flag `cfg.stream_tokens=True`
+  (CLI: `/stream` no REPL). `_openai_compatible_stream()` faz SSE com
+  `stream_options.include_usage`, acumula `delta.content` na ChatResponse.text
+  (callers não precisam mudar nada), e emite `llm_token` event por chunk.
+  Desabilitado quando há tools/json_schema (não vale a complexidade de remontar
+  tool_calls chunked). Fallback automático para non-streaming se SSE quebrar.
 
 ## Observability
 
