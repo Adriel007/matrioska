@@ -303,6 +303,21 @@ class LLMClient:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
 
+        # Streaming path: opt-in via cfg.stream_tokens. Disabled when tools
+        # or json_schema are requested — chunked tool_calls reassembly is
+        # provider-specific and not worth the complexity for current callers.
+        stream = bool(getattr(self.cfg, "stream_tokens", False)) and not tools and not json_schema
+        if stream:
+            try:
+                return self._openai_compatible_stream(url, headers, payload, spec)
+            except _RateLimitError:
+                raise
+            except _RetriableError:
+                raise
+            except Exception as e:
+                logger.debug("stream failed (%s); falling back to non-streaming", e)
+                # Fall through to non-streaming path below
+
         try:
             with httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0)) as http:
                 r = http.post(url, headers=headers, json=payload)
@@ -352,6 +367,84 @@ class LLMClient:
             prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
             completion_tokens=int(usage.get("completion_tokens", 0) or 0),
             raw=data,
+        )
+
+    def _openai_compatible_stream(
+        self,
+        url: str,
+        headers: Dict[str, str],
+        payload: Dict[str, Any],
+        spec: ModelSpec,
+    ) -> ChatResponse:
+        """SSE streaming path for OpenAI-compatible providers.
+
+        Parses ``data: {...}\\n\\n`` chunks, accumulates ``delta.content`` into
+        a single text, and emits a ``llm_token`` event per chunk. Usage
+        accounting comes from the final chunk (``stream_options.include_usage``).
+        The accumulated ChatResponse is returned exactly like the non-streaming
+        path, so callers can ignore the streaming detail entirely.
+        """
+        import httpx
+
+        stream_payload = dict(payload)
+        stream_payload["stream"] = True
+        stream_payload["stream_options"] = {"include_usage": True}
+
+        parts: List[str] = []
+        prompt_tokens = 0
+        completion_tokens = 0
+
+        try:
+            with httpx.Client(timeout=httpx.Timeout(300.0, connect=10.0)) as http:
+                with http.stream("POST", url, headers=headers, json=stream_payload) as r:
+                    if r.status_code == 429:
+                        body = r.read().decode("utf-8", errors="ignore")
+                        retry_after = parse_retry_after(dict(r.headers), body)
+                        raise _RateLimitError(f"HTTP 429: {body[:200]}", retry_after=retry_after)
+                    if r.status_code in (408, 425, 500, 502, 503, 504):
+                        body = r.read().decode("utf-8", errors="ignore")
+                        raise _RetriableError(f"HTTP {r.status_code}: {body[:200]}")
+                    r.raise_for_status()
+
+                    for raw_line in r.iter_lines():
+                        if not raw_line:
+                            continue
+                        line = raw_line.strip()
+                        if not line.startswith("data:"):
+                            continue
+                        payload_str = line[5:].strip()
+                        if payload_str == "[DONE]":
+                            break
+                        try:
+                            chunk = json.loads(payload_str)
+                        except json.JSONDecodeError:
+                            continue
+
+                        for ch in chunk.get("choices") or []:
+                            delta = ch.get("delta") or {}
+                            piece = delta.get("content")
+                            if piece:
+                                parts.append(piece)
+                                self._emit(
+                                    "llm_token",
+                                    provider=spec.provider,
+                                    model=spec.model,
+                                    delta=piece,
+                                )
+
+                        usage = chunk.get("usage") or {}
+                        if usage:
+                            prompt_tokens = int(usage.get("prompt_tokens", prompt_tokens) or prompt_tokens)
+                            completion_tokens = int(usage.get("completion_tokens", completion_tokens) or completion_tokens)
+        except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
+            raise _RetriableError(f"network: {e}")
+
+        return ChatResponse(
+            text="".join(parts),
+            tool_calls=[],
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            raw={},
         )
 
     def _anthropic_chat(

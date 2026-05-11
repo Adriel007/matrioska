@@ -18,13 +18,14 @@ Task → [Phase 1: N× Architect → Judge → Best Plan]
 ```
 src/matrioska/
 ├── core/         State graph, typed contracts, events, config
-├── llm/          Multi-provider client, circuit breaker, MoE router
-├── memory/       Episodic → Semantic → Procedural (3-tier)
+├── llm/          Multi-provider client, circuit breaker, MoE router, slot pool
+├── memory/       Episodic → Semantic → Procedural + Obsidian Vault (global)
 ├── agents/       Architect, Generator, TestDesigner, Validator, Judge, Repairer, Reflector
-├── pipeline/     3-phase orchestration with checkpointing
+├── pipeline/     3-phase orchestration with checkpointing, preflight, executor
 ├── tools/        Sandbox executor, tool dispatcher
 ├── eval/         Metrics, golden regression suite (30 tasks)
-├── cli/          Rich CLI (run, resume, show, clean, serve, eval)
+├── cli/          Rich CLI + dashboard + init wizard
+│                 (run, resume, show, clean, serve, eval, init, btw, vault)
 └── api.py        Python API + MCP server
 ```
 
@@ -53,24 +54,49 @@ src/matrioska/
 # Install
 pip install -e ".[all]"
 
-# Set up your provider (create a .env from .env.example)
+# Interactive setup: pick provider, model, scaffold .env and MATRIOSKA.md
+matrioska init
+
+# …or set env vars manually
 export MATRIOSKA_PROVIDER=openai
 export MATRIOSKA_BASE_URL=https://api.openai.com/v1
 export MATRIOSKA_API_KEY=sk-...
 export MATRIOSKA_MODEL=gpt-4o-mini
-export MATRIOSKA_ARCHITECT_MODEL=gpt-4o
 
 # Run a task
 matrioska run --task "Create a FastAPI CRUD API for books with SQLite"
 
-# Plan only (architecture without code generation)
-matrioska run --task "Build a real-time chat app" --plan-only
+# Rapid iteration: skip ToT, Reflexion, TestDesign, ACI, Phase 3
+matrioska run --task "..." --quick
 
-# Resume interrupted run
+# Permission modes
+matrioska run --task "..." --mode plan         # plan only (return after Phase 1)
+matrioska run --task "..." --mode ask          # confirm each file before generation
+matrioska run --task "..." --interactive       # review and approve plan before Phase 2
+
+# One-shot LLM query without touching the pipeline or memory
+matrioska btw "what is RRF retrieval fusion?"
+
+# Resume / inspect
 matrioska resume
-
-# Show current state
 matrioska show
+
+# Interactive REPL (no subcommand) — slash commands, ! shell, streaming
+matrioska
+# matrioska › /help
+# matrioska › /effort high
+# matrioska › Create a CLI todo app with SQLite
+# matrioska › /vault search sqlite
+# matrioska › !ls
+
+# Global knowledge vault (Obsidian-compatible)
+matrioska vault list
+matrioska vault search "sqlite patterns" --scope global
+matrioska vault doctor
+matrioska vault graph -o vault-graph.md
+
+# DSPy-driven prompt compilation against the golden suite
+matrioska compile --target architect --category cli --max-tasks 5
 
 # Run golden evaluation suite
 matrioska eval --category cli
@@ -206,9 +232,80 @@ matrioska run --architect-model claude-opus-4 --generator-model claude-sonnet-4 
 | Tier | Storage | Retrieval | Retention |
 |------|---------|-----------|-----------|
 | **Working** | shared_state + architecture + artifacts | Direct access | Current run |
-| **Episodic** | knowledge/runs/*.md (Obsidian-compatible) | Keyword + ChromaDB embeddings | All runs |
+| **Episodic** | knowledge/runs/*.md (Obsidian-compatible) | Keyword + ChromaDB embeddings | All runs (per project) |
 | **Semantic** | knowledge/concepts/*.md + knowledge_graph.json | Embedding + k-hop graph traversal | Cross-project |
 | **Procedural** | knowledge/procedural_patterns.json + MATRIOSKA.md | DSPy-compiled few-shots | Permanent |
+| **Global Vault** | `~/.matrioska/vault/` (Markdown + YAML + wikilinks) | Dual-level: local / global / linked / all | Permanent, cross-project |
+
+### Global Obsidian Vault (LLM Wiki Pattern)
+
+Inspired by Karpathy's [LLM Wiki](https://x.com/karpathy/) and [LightRAG (EMNLP 2025)](https://arxiv.org/abs/2409.14813),
+the vault "compiles" run knowledge into permanent Markdown instead of re-deriving with RAG every call.
+
+```
+~/.matrioska/vault/
+├── projects/<name>/
+│   ├── architecture.md   # decisions + per-run breakdown (timestamped)
+│   ├── patterns.md       # detected patterns (heuristic, dedup'd)
+│   ├── lessons.md        # repaired files, recurring fixes
+│   └── links.md          # [[wikilinks]] to related projects
+├── concepts/<tag>.md     # cross-project: e.g. sqlite, fastapi, argparse
+├── bugs/<slug>.md        # recurring bug → which projects hit it
+└── INDEX.md              # auto-maintained, Obsidian Graph View-ready
+```
+
+After every run, `orchestrator._compile_into_vault()` runs an **idempotent**, **append-only** compiler:
+`derive_tags(task, artifacts)` → `extract_lessons_and_bugs()` → `compile_from_run()`. Marker-based section
+upserts (`<!-- section:ID -->`) ensure rerunning the same task never duplicates concept bullets.
+
+Retrieval scopes (LightRAG dual-level):
+- `local`  — current project (`./matrioska_work/knowledge/`)
+- `global` — concepts + bugs across all projects
+- `linked` — BFS over `[[wikilinks]]` in `links.md`, `max_hops=2`
+- `all`    — everything
+
+Before Phase 1, the Architect receives a `RELEVANT VAULT KNOWLEDGE` block (scope=global, k=5) so
+patterns observed in past projects influence new decompositions.
+
+The same vault is exposed via the MCP server (`matrioska serve`): tools `vault_search`,
+`vault_get`, `vault_list`, `vault_doctor`, `vault_graph`, `vault_related` let Claude Code,
+Cursor, or Windsurf reuse Matrioska's accumulated knowledge directly. Writes are not
+exposed — the vault is only mutated by `_compile_into_vault` after a real run, so it
+remains a deterministic derivative of the run history.
+
+## Interactive REPL
+
+```
+$ matrioska
+╭──────────────────────────────────────────────────────────────╮
+│  Matrioska — interactive shell                                │
+│  /help for commands · ! prefix for shell · Ctrl+D to exit     │
+╰──────────────────────────────────────────────────────────────╯
+  provider=groq  model=llama-3.3-70b  effort=medium  vault on
+
+matrioska › /help
+matrioska › /effort high            # 5 candidates, ToT + Reflexion + TestDesign
+matrioska › /stream                 # token-by-token via EventBus
+matrioska › Create a FastAPI CRUD API with SQLite
+matrioska › /vault search "sqlite"  # query the global vault inline
+matrioska › !ls matrioska_work       # shell prefix
+matrioska › /usage                  # tokens / cost this session
+```
+
+Slash commands: `/help`, `/config`, `/model`, `/usage`, `/clear`, `/plan`, `/effort`,
+`/memory`, `/init`, `/diff`, `/slots`, `/btw`, `/vault`, `/stream`, `/history`,
+`/quit`. Built on prompt_toolkit when installed (history at `~/.matrioska/history`,
+multi-line via Esc+Enter, ↑/↓ for previous commands); falls back to `input()` otherwise.
+
+## DSPy Prompt Compilation
+
+`matrioska compile --target architect --category cli --max-tasks 10` runs the
+[DSPy](https://arxiv.org/abs/2310.03714) compilation loop against the golden suite:
+splits tasks into train/val, runs a baseline, then `BootstrapFewShot` with
+`golden_metric` (binary `evaluate_result.pass`) as the objective. Compiled few-shot
+demos persisted at `~/.matrioska/dspy_compiled/{target}_demos.json`. When `dspy-ai`
+isn't installed, returns the baseline with `skipped_reason='dspy_not_installed'`
+so the same harness works either way.
 
 ## Evaluation
 
@@ -250,6 +347,10 @@ All options: CLI flags, env vars (`MATRIOSKA_<UPPER>`), or `.env` file.
 | `--retrieve-k` | `MATRIOSKA_RETRIEVE_K` | `3` | Past runs to retrieve as context |
 | _(flag TBD)_ | `MATRIOSKA_ENABLE_TEST_DESIGN` | `true` | AlphaCodium+AgentCoder test enrichment |
 | _(flag TBD)_ | `MATRIOSKA_USE_ACI_REPAIR` | `true` | SWE-agent ACI targeted patch repair |
+| `--quick` | `MATRIOSKA_QUICK` | `false` | Skip ToT, Reflexion, TestDesign, ACI, Phase 3 |
+| `--mode` | `MATRIOSKA_PERMISSION_MODE` | `auto` | `auto` \| `plan` \| `ask` |
+| `--no-vault` | `MATRIOSKA_ENABLE_VAULT` | `true` | Disable global Obsidian vault writes/reads |
+| `--vault-dir` | `MATRIOSKA_VAULT_DIR` | `~/.matrioska/vault` | Override vault location |
 
 See `.env.example` for the full reference.
 

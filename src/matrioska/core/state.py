@@ -87,7 +87,7 @@ class FileArtifact:
     order: int
     content: str
     shared_state_updates: Dict[str, Any] = field(default_factory=dict)
-    status: Literal["pending", "generating", "done", "failed"] = "pending"
+    status: Literal["pending", "generating", "done", "failed", "skipped"] = "pending"
     repair_count: int = 0
     generator_model: str = ""
     generation_tokens: int = 0

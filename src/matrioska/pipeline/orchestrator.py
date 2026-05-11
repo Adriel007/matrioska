@@ -127,9 +127,14 @@ class Matrioska:
         # Inject pre-flight context into the Architect
         self._preflight = preflight
 
+        architect_ctx = preflight.architect_context_block() or ""
+        vault_hint = self._retrieve_vault_context(task) if self.cfg.enable_vault else ""
+        if vault_hint:
+            architect_ctx = (architect_ctx + "\n\n" + vault_hint).strip()
+
         if not run_phase1(
             state, self.cfg, self.llm, self.episodic, self.procedural, self.bus,
-            preflight_context=preflight.architect_context_block() or None,
+            preflight_context=architect_ctx or None,
         ):
             self._write_note(task, state, started, t0, "failed")
             return self._result(state, "failed")
@@ -140,6 +145,11 @@ class Matrioska:
             logger.info("--plan_only: stopping after architecture")
             self._write_note(task, state, started, t0, "plan_only")
             return self._result(state, "plan_only")
+
+        # ── Interactive plan review ─────────────────────────────────────
+        if self.cfg.interactive and not self._confirm_plan(state):
+            self._write_note(task, state, started, t0, "aborted")
+            return self._result(state, "aborted")
 
         # ── Phase 2: Generation ────────────────────────────────────────
         gen_ok = run_phase2(state, self.cfg, self.llm, self.bus, self.depth)
@@ -153,7 +163,11 @@ class Matrioska:
                 logger.info("Installed deps: %s", ", ".join(installed))
 
         # ── Phase 3: Verification ──────────────────────────────────────
-        verify_results = run_phase3(state, self.cfg, self.bus, self.metrics)
+        if self.cfg.quick:
+            logger.info("--quick: skipping Phase 3 verification")
+            verify_results = {"overall_ok": True, "skipped": "quick mode"}
+        else:
+            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics)
         self.graph.save_checkpoint(label="after_verification")
 
         # ── Finalize ───────────────────────────────────────────────────
@@ -311,6 +325,35 @@ class Matrioska:
                 "Connectivity OK: %s/%s", spec.provider, spec.model
             )
 
+    def _confirm_plan(self, state: RunState) -> bool:
+        """Show the proposed architecture and ask the user to approve."""
+        arch = state.architecture
+        if not arch:
+            return True
+        print(f"\n── Plan for: {arch.project_name} ──")
+        for f in arch.files:
+            badges = []
+            if f.shared_state_reads:
+                badges.append(f"reads={f.shared_state_reads}")
+            if f.shared_state_writes:
+                badges.append(f"writes={f.shared_state_writes}")
+            if f.complex:
+                badges.append("[COMPLEX]")
+            extra = "  " + " ".join(badges) if badges else ""
+            print(f"  {f.order}. {f.name}.{f.extension}{extra}")
+        print()
+        try:
+            raw = input("Continue with this plan? [Y/n/q]: ").strip().lower()
+        except EOFError:
+            return True
+        if raw in ("", "y", "yes"):
+            return True
+        if raw in ("q", "quit", "abort"):
+            print("Aborted.")
+            return False
+        print("Cancelled (use --task-file to refine and rerun).")
+        return False
+
     def _banner(self, task: str) -> None:
         bar = "=" * 80
         print(f"\n{bar}\n  Matrioska V3\n  {task}\n{bar}")
@@ -372,11 +415,82 @@ class Matrioska:
             print(f"Note: {note_path}")
 
             # Ingest into semantic memory
-            if state.architecture:
+            if state.architecture and self.semantic is not None:
                 tags = [a.extension for a in state.artifacts.values()]
                 self.semantic.ingest_run(task, tags, status)
         except Exception as e:
             logger.warning("Failed to write episodic note: %s", e)
+
+        # Compile knowledge into global Obsidian vault (Karpathy LLM Wiki pattern)
+        if self.cfg.enable_vault and state.architecture and status != "aborted":
+            try:
+                self._compile_into_vault(task, state, status)
+            except Exception as e:
+                logger.warning("Vault compile failed: %s", e)
+
+    def _retrieve_vault_context(self, task: str, k: int = 5) -> str:
+        """Retrieve concept/bug notes from the global vault relevant to the task.
+
+        Returns a compact context block to inject into the Architect.
+        Silently no-ops if the vault is empty or unavailable.
+        """
+        try:
+            from matrioska.memory.vault import GlobalVault, default_vault_dir
+            root = Path(self.cfg.vault_dir).expanduser() if self.cfg.vault_dir else default_vault_dir()
+            if not root.exists():
+                return ""
+            vault = GlobalVault(root)
+            results = vault.search(task, scope="global", k=k)
+        except Exception as e:
+            logger.debug("Vault retrieval skipped: %s", e)
+            return ""
+
+        if not results:
+            return ""
+
+        lines = ["RELEVANT VAULT KNOWLEDGE (Karpathy LLM Wiki, dedup'd):"]
+        for r in results:
+            lines.append(f"  • [{r['kind']}] {r['title']}: {r['snippet'][:160]}")
+        return "\n".join(lines)
+
+    def _compile_into_vault(self, task: str, state: "RunState", status: str) -> None:
+        """Upsert per-run knowledge into the global Obsidian vault."""
+        from matrioska.memory.vault import (
+            GlobalVault, default_vault_dir,
+            derive_tags, extract_lessons_and_bugs,
+        )
+        from pathlib import Path as _P
+
+        root = _P(self.cfg.vault_dir).expanduser() if self.cfg.vault_dir else default_vault_dir()
+        vault = GlobalVault(root)
+
+        artifacts = list(state.artifacts.values())
+        files_meta = [
+            {
+                "name": a.name,
+                "extension": a.extension,
+                "status": a.status,
+                "repair_count": a.repair_count,
+            }
+            for a in artifacts
+        ]
+        tags = derive_tags(task, artifacts)
+        lessons, bugs = extract_lessons_and_bugs(artifacts)
+
+        touched = vault.compile_from_run(
+            task=task,
+            project_name=state.project_name or "untitled",
+            files=files_meta,
+            shared_state=state.shared_state,
+            status=status,
+            tags=tags,
+            lessons=lessons,
+            bugs=bugs,
+            provider=self.cfg.provider,
+            model=self.cfg.model,
+        )
+        if touched:
+            logger.info("Vault: upserted %d note(s) under %s", len(touched), vault.root)
 
     def _dry_run(self, task: str) -> Dict[str, Any]:
         print("[dry-run] Config:")

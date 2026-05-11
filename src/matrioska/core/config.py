@@ -121,6 +121,24 @@ class Config:
     execute_feedback: bool = True
     install_deps: bool = True
 
+    # ── Quick mode / permissions / vault ──────────────────────────────────
+    # quick=True: skip ToT, Reflexion, TestDesign, ACI, and Phase 3. Useful
+    #   for rapid iteration during development (sub-30s runs typical).
+    # permission_mode: "auto" (default, current behavior), "plan" (alias of
+    #   plan_only), "ask" (pause and confirm before each file generation).
+    # enable_vault: writes/reads ~/.matrioska/vault (global Obsidian-compatible
+    #   knowledge base). Disable for ephemeral CI runs.
+    quick: bool = False
+    permission_mode: str = "auto"  # auto | plan | ask
+    enable_vault: bool = True
+    vault_dir: str = ""  # default: ~/.matrioska/vault
+
+    # ── Streaming ─────────────────────────────────────────────────────────
+    # stream_tokens=True: openai-compatible chat uses SSE and emits per-chunk
+    # `llm_token` events through the event bus. Token deltas are accumulated
+    # into ChatResponse.text exactly as the non-streaming path returns.
+    stream_tokens: bool = False
+
     # ── Misc ──────────────────────────────────────────────────────────────
     thinking: bool = False
     dry_run: bool = False
@@ -197,6 +215,7 @@ _BOOL_FLAGS = {
     "enable_test_design", "use_aci_repair",
     "enable_sandbox", "enable_graphrag", "enable_otel", "enable_cost_tracking",
     "incremental", "execute_feedback", "install_deps",
+    "quick", "enable_vault", "stream_tokens",
 }
 _INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",
                "architect_candidates", "sandbox_timeout"}
@@ -265,6 +284,25 @@ def load_config(cli_overrides: Optional[Dict[str, Any]] = None) -> Config:
     default_url = "https://api.openai.com/v1"
     if cfg.provider in _PROVIDER_DEFAULTS and cfg.base_url == default_url:
         cfg.base_url = _PROVIDER_DEFAULTS[cfg.provider]
+
+    # Quick mode: collapse all "slow" features. Honors explicit CLI/env
+    # overrides (only sets a flag if it wasn't explicitly toggled).
+    if cfg.quick:
+        explicitly_set = set(cli.keys()) if cli else set()
+        if "enable_tot" not in explicitly_set and "enable_tot" not in os.environ.get("_MATRIOSKA_EXPLICIT", ""):
+            cfg.enable_tot = False
+        if "enable_reflexion" not in explicitly_set:
+            cfg.enable_reflexion = False
+        if "enable_test_design" not in explicitly_set:
+            cfg.enable_test_design = False
+        if "architect_candidates" not in explicitly_set:
+            cfg.architect_candidates = 1
+        if "max_repairs" not in explicitly_set:
+            cfg.max_repairs = 1
+
+    # plan permission mode → set plan_only flag for orchestrator
+    if cfg.permission_mode == "plan":
+        cfg.plan_only = True
 
     return cfg
 

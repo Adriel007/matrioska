@@ -73,6 +73,14 @@ def run_phase2(
             [f"{f.name}.{f.extension}" for f in layer],
         )
 
+        # Permission gate (mode=ask): confirm each file before generating.
+        # Skipped files get a placeholder artifact so downstream files can proceed.
+        if getattr(cfg, "permission_mode", "auto") == "ask":
+            layer = _ask_layer_consent(layer, layer_idx, len(layers), state)
+            if not layer:
+                logger.info("Layer %d skipped by user", layer_idx)
+                continue
+
         rate_limit_hits = 0
         total_files = len(layer)
 
@@ -152,6 +160,54 @@ def run_phase2(
         )
 
     return success
+
+
+def _ask_layer_consent(
+    layer: List[FileSpec],
+    layer_idx: int,
+    total_layers: int,
+    state: RunState,
+) -> List[FileSpec]:
+    """Prompt the user to approve each file in a layer (--mode ask).
+
+    Returns the filtered list of specs the user approved.  Skipped specs get
+    a placeholder artifact + shared_state stubs so the rest of the DAG can
+    continue.  Quitting aborts the whole pipeline (raises SystemExit).
+    """
+    print(f"\n── Layer {layer_idx}/{total_layers}: {len(layer)} file(s) pending ──")
+    approved: List[FileSpec] = []
+    for spec in layer:
+        reads = ", ".join(spec.shared_state_reads) or "(none)"
+        writes = ", ".join(spec.shared_state_writes) or "(none)"
+        print(f"\n  • {spec.name}.{spec.extension}  (order={spec.order})")
+        if spec.details:
+            print(f"    {spec.details[:120].replace(chr(10), ' ')}")
+        print(f"    reads:  {reads}")
+        print(f"    writes: {writes}")
+        while True:
+            try:
+                raw = input("    Generate this file? [Y/n/s(kip)/q(uit)]: ").strip().lower()
+            except EOFError:
+                raw = "y"
+            if raw in ("", "y", "yes"):
+                approved.append(spec)
+                break
+            if raw in ("n", "no", "s", "skip"):
+                # placeholder so downstream files can resolve shared_state_reads
+                placeholder = FileArtifact(
+                    name=spec.name, extension=spec.extension, order=spec.order,
+                    content="", status="skipped",
+                )
+                state.add_artifact(placeholder)
+                for k in spec.shared_state_writes:
+                    state.shared_state.setdefault(k, f"__skipped__{k}__")
+                print(f"    ✗ skipped")
+                break
+            if raw in ("q", "quit", "abort"):
+                print("    Aborted by user.")
+                raise SystemExit(130)
+            print("    → answer y / n / s / q")
+    return approved
 
 
 def _finalize_artifact(artifact: FileArtifact, state: RunState, spec: FileSpec) -> None:
