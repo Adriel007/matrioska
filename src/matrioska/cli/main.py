@@ -71,6 +71,8 @@ def build_parser() -> argparse.ArgumentParser:
         "--plan-only", dest="plan_only", action="store_true", default=None
     )
     run_p.add_argument("--interactive", action="store_true", default=None)
+    run_p.add_argument("--no-dashboard", dest="no_dashboard", action="store_true",
+                       help="Disable live dashboard, print plain logs instead")
 
     # resume
     res_p = sub.add_parser("resume", help="Resume from latest checkpoint")
@@ -166,7 +168,6 @@ def _build_cli_overrides(ns: argparse.Namespace) -> Dict[str, Any]:
 
 def _cmd_run(ns: argparse.Namespace) -> int:
     from matrioska.core.config import load_config, validate_config
-    from matrioska.pipeline.orchestrator import Matrioska
 
     overrides = _build_cli_overrides(ns)
     cfg = load_config(overrides)
@@ -181,8 +182,21 @@ def _cmd_run(ns: argparse.Namespace) -> int:
         print("ERROR: --task or --task-file required", file=sys.stderr)
         return 2
 
-    m = Matrioska(cfg)
-    result = m.run(task)
+    no_dash = getattr(ns, "no_dashboard", False)
+
+    if cfg.dry_run or no_dash:
+        from matrioska.pipeline.orchestrator import Matrioska
+        m = Matrioska(cfg)
+        result = m.run(task)
+    else:
+        import logging
+        logging.disable(logging.WARNING)  # silence logs so they don't bleed into dashboard
+        try:
+            from matrioska.cli.dashboard import run_with_dashboard
+            result = run_with_dashboard(cfg, task)
+        finally:
+            logging.disable(logging.NOTSET)
+
     return (
         0
         if result.get("status") in ("success", "plan_only", "partial", "dry_run")
@@ -210,7 +224,7 @@ def _cmd_show(ns: argparse.Namespace) -> int:
     cfg = Config(work_dir=work_dir)
     m = Matrioska(cfg)
     info = m.show()
-    _pretty_print(info)
+    _rich_show(info)
     return 0
 
 
@@ -295,6 +309,60 @@ def _cmd_eval(ns: argparse.Namespace) -> int:
     print(f"\n{passed}/{len(tasks)} passed")
 
     return 0 if passed == len(tasks) else 1
+
+
+def _rich_show(info: Dict[str, Any]) -> None:
+    """Pretty-print `matrioska show` output with Rich."""
+    try:
+        from rich.console import Console
+        from rich.table import Table
+        from rich import box
+        from rich.panel import Panel
+        from rich.text import Text
+    except ImportError:
+        _pretty_print(info)
+        return
+
+    console = Console()
+    status = info.get("status", "?")
+    proj = info.get("project_name", "?")
+    work = info.get("work_dir", "?")
+
+    style = {"done": "green", "partial": "yellow", "failed": "red"}.get(status, "cyan")
+    console.print(Panel(
+        f"[bold]{proj}[/]  [{style}]{status.upper()}[/]\n[dim]{work}[/]",
+        title="[bold]MATRIOSKA[/]", border_style="blue",
+    ))
+
+    files = info.get("files", [])
+    if files:
+        tbl = Table(box=box.SIMPLE, show_header=True, header_style="bold dim", expand=False)
+        tbl.add_column("#", style="dim", justify="right")
+        tbl.add_column("File")
+        tbl.add_column("Status", justify="center")
+        tbl.add_column("Size", justify="right", style="dim")
+        for f in files:
+            st = f.get("status", "?")
+            icon = {"done": "[green]✓[/]", "failed": "[red]✗[/]"}.get(st, "[dim]○[/]")
+            tbl.add_row(
+                str(f.get("order", f.get("name", ""))),
+                f"{f['name']}.{f['extension']}",
+                f"{icon} {st}",
+                f"{f['chars']:,}c" if "chars" in f else "—",
+            )
+        console.print(tbl)
+
+    tok = info.get("tokens", {})
+    if tok:
+        console.print(
+            f"  [dim]Tokens[/]  prompt={tok.get('prompt_tokens',0):,}  "
+            f"completion={tok.get('completion_tokens',0):,}  "
+            f"cost=~${tok.get('estimated_cost_usd',0):.4f}"
+        )
+
+    cps = info.get("checkpoints", [])
+    if cps:
+        console.print(f"  [dim]Checkpoints[/]  {len(cps)} saved")
 
 
 def _pretty_print(data: Any, indent: int = 0) -> None:
