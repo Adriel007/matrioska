@@ -137,7 +137,7 @@ class Config:
     # stream_tokens=True: openai-compatible chat uses SSE and emits per-chunk
     # `llm_token` events through the event bus. Token deltas are accumulated
     # into ChatResponse.text exactly as the non-streaming path returns.
-    stream_tokens: bool = False
+    stream_tokens: bool = True
 
     # ── Misc ──────────────────────────────────────────────────────────────
     thinking: bool = False
