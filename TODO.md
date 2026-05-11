@@ -67,6 +67,106 @@
 
 ## Memory & Knowledge
 
+### Obsidian-compatible Vault (Local + Global + Cross-project)
+
+*Fundamentação: Karpathy LLM Wiki Pattern (abr/2026, 16M views, 5k★),
+LightRAG dual-level graph (EMNLP 2025, arXiv 2409.14813),
+GAM Hierarchical Graph-based Agentic Memory (arXiv 2604.12285),
+engraph/MCPVault/obsidian-mcp — 24+ MCP servers para vaults Obsidian.*
+
+**A ideia central (Karpathy):** em vez de RAG puro (re-derivar relações a cada
+query), "compilar" o conhecimento em Markdown permanente. O vault é o binário: notas
+de conceitos, padrões e bugs atualizados incrementalmente após cada run. O Matrioska
+já armazena runs em Markdown + YAML frontmatter em `knowledge/runs/` — está a um
+passo de ser um vault Obsidian nativo.
+
+#### Arquitetura proposta
+
+```
+~/.matrioska/vault/               ← VAULT GLOBAL (Obsidian, compartilhado entre projetos)
+├── projects/
+│   ├── budget_tracker/
+│   │   ├── architecture.md       ← decomposição e decisões do projeto
+│   │   ├── patterns.md           ← padrões observados (ex: "usa SQLite com AUTOINCREMENT")
+│   │   ├── lessons.md            ← bugs encontrados e como foram resolvidos
+│   │   └── links.md              ← [[api_auth]] [[cli_pipeline]] (projetos relacionados)
+│   └── api_auth/
+│       └── ...
+├── concepts/                     ← conhecimento transversal a projetos
+│   ├── sqlite_patterns.md        ← "como fazer SQLite bem em Python"
+│   ├── fastapi_auth.md           ← padrões de autenticação com FastAPI
+│   └── argparse_cli.md           ← padrões de CLI com argparse
+├── bugs/
+│   ├── common_syntax_errors.md   ← erros frequentes do modelo 8b
+│   └── import_circular.md        ← padrão "importação circular entre módulos"
+└── INDEX.md                      ← índice do grafo (wikilinks + tags)
+
+./matrioska_work/knowledge/        ← VAULT LOCAL (projeto atual, já existe)
+├── runs/                          ← EpisodicMemory (já funciona)
+├── concepts/                      ← SemanticMemory (parcial)
+└── MATRIOSKA.md                   ← ProceduralMemory (já funciona)
+```
+
+- [ ] **Vault global em `~/.matrioska/vault/`** — diretório único compartilhado entre
+  todos os projetos Matrioska. Compatível nativamente com Obsidian (Markdown + YAML
+  frontmatter + wikilinks `[[NomeDoArquivo]]`). Após cada run, extrair conceitos,
+  padrões e bugs e fazer upsert nas notas relevantes do vault global.
+  Inspiração: Karpathy LLM Wiki — "compilar em vez de re-derivar".
+
+- [ ] **Knowledge compiler (LLM Wiki pattern)** — após cada run bem-sucedido, um agente
+  "compiler" lê os artefatos gerados + erros encontrados e produz/atualiza notas no
+  vault global: (1) identifica qual conceito foi usado (ex: "SQLite", "argparse"),
+  (2) extrai padrões ("usa AUTOINCREMENT", "separa DB logic em módulo próprio"),
+  (3) extrai bugs ("modelo 8b esquece fechar conexão SQLite"), (4) faz merge com a
+  nota existente — nunca substitui, apenas enriquece. Abordagem: LLM small/fast
+  gera diff da nota, outro LLM faz merge inteligente.
+
+- [ ] **Dual-level retrieval (LightRAG style)** — implementar dois escopos de busca
+  distintos, configuráveis por query:
+  - **Local**: busca apenas no vault do projeto atual (`./matrioska_work/knowledge/`)
+  - **Global**: busca em conceitos transversais (`~/.matrioska/vault/concepts/` + bugs)
+  - **Cross-project**: atravessa wikilinks para encontrar projetos com padrões similares
+    (ex: "que outros projetos usaram SQLite + argparse?")
+  Retrieval: BM25 keyword + ChromaDB embeddings + graph traversal por wikilinks.
+  Fusão via RRF (Reciprocal Rank Fusion) — mesmo approach que atinge 95.2% no
+  LongMemEval-S (agentmemory, 2025).
+
+- [ ] **Context scoping por query** — flag `--scope local|global|linked|all`:
+  - `local`  — só memória do projeto atual (default, mais barato)
+  - `global` — conceitos e padrões globais sem cruzar projetos específicos
+  - `linked` — projeto atual + projetos que o usuário marcou como relacionados
+  - `all`    — vault inteiro (para queries de "o que aprendi sobre SQLite em geral?")
+  O Architect recebe o contexto filtrado pelo scope, evitando ruído de projetos
+  não relacionados. Granularidade: projeto → módulo → conceito → bug.
+
+- [ ] **Cross-project links (wikilinks + grafo)** — o usuário pode marcar projetos
+  como relacionados via `[[projeto_b]]` em `links.md` do projeto A, ou via
+  `matrioska link projeto_a projeto_b --reason "mesma stack FastAPI+SQLite"`.
+  Quando scope=linked, o retrieval atravessa esses links com BFS limitado a `max_hops`
+  (default 2). Dual-level: fine-grained local + high-level global (LightRAG arXiv 2409.14813).
+
+- [ ] **MCP server para o vault** — expor o vault da Matrioska como MCP server para
+  que outros agentes (Claude Code, Cursor, Windsurf) possam ler/escrever a memória.
+  Ferramentas MCP: `search_vault(query, scope, project?)`, `get_note(path)`,
+  `list_project_notes(project)`, `find_related(project, max_hops)`,
+  `upsert_concept(name, content)`. Implementar com `mcp` library (já dep opcional).
+  Referência: engraph (engraph GitHub), MCPVault (bitbonsai GitHub),
+  obsidian-mcp (lstpsche GitHub).
+
+- [ ] **Drill-down interativo no REPL** — no REPL (`matrioska`), comandos de navegação
+  no vault: `/vault search <query>` busca em todos os escopos e mostra ranking,
+  `/vault project <nome>` abre overview do projeto, `/vault concept <nome>` abre nota
+  do conceito, `/vault related <projeto>` lista projetos com wikilinks comuns.
+  Resultado renderizado com Rich — links clicáveis no terminal (Cmd+Click).
+
+- [ ] **Vault health & graph visualization** — `matrioska vault doctor` detecta notas
+  órfãs (sem wikilinks), conceitos stale (último update > 30 dias sem uso),
+  projetos sem lessons.md. `matrioska vault graph` exporta o grafo de wikilinks como
+  DOT/Mermaid para visualização. Alternativa: abrir diretamente no Obsidian — o vault
+  já é compatível nativamente com o Graph View do Obsidian.
+
+### Outros itens de Memory
+
 - [ ] **DSPy compilation loop** — `ProceduralMemory` is a scaffold. Wire up the
   golden task suite as a DSPy training set: generate → evaluate → compile prompt
   → repeat until `first_pass_rate ≥ 80%`.
