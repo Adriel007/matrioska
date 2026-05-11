@@ -343,14 +343,16 @@ All options: CLI flags, env vars (`MATRIOSKA_<UPPER>`), or `.env` file.
 | `--max-depth` | `MATRIOSKA_MAX_DEPTH` | `2` | Max nested sub-agent depth |
 | `--parallel` | `MATRIOSKA_PARALLEL` | `true` | Parallel generation within DAG layers |
 | `--sandbox` | `MATRIOSKA_ENABLE_SANDBOX` | `false` | Enable Docker sandbox execution |
-| `--reflexion` | `MATRIOSKA_ENABLE_REFLEXION` | `true` | Enable Reflexion loop |
+| `--no-reflexion` | `MATRIOSKA_ENABLE_REFLEXION` | `true` | Disable Reflexion loop |
+| `--no-tot` | `MATRIOSKA_ENABLE_TOT` | `true` | Disable Tree-of-Thoughts voting |
 | `--retrieve-k` | `MATRIOSKA_RETRIEVE_K` | `3` | Past runs to retrieve as context |
-| _(flag TBD)_ | `MATRIOSKA_ENABLE_TEST_DESIGN` | `true` | AlphaCodium+AgentCoder test enrichment |
-| _(flag TBD)_ | `MATRIOSKA_USE_ACI_REPAIR` | `true` | SWE-agent ACI targeted patch repair |
+| _(env only)_ | `MATRIOSKA_ENABLE_TEST_DESIGN` | `true` | AlphaCodium+AgentCoder test enrichment |
+| _(env only)_ | `MATRIOSKA_USE_ACI_REPAIR` | `true` | SWE-agent ACI targeted patch repair |
 | `--quick` | `MATRIOSKA_QUICK` | `false` | Skip ToT, Reflexion, TestDesign, ACI, Phase 3 |
 | `--mode` | `MATRIOSKA_PERMISSION_MODE` | `auto` | `auto` \| `plan` \| `ask` |
 | `--no-vault` | `MATRIOSKA_ENABLE_VAULT` | `true` | Disable global Obsidian vault writes/reads |
 | `--vault-dir` | `MATRIOSKA_VAULT_DIR` | `~/.matrioska/vault` | Override vault location |
+| _(env only)_ | `MATRIOSKA_STREAM_TOKENS` | `false` | SSE token streaming (or `/stream` in REPL) |
 
 See `.env.example` for the full reference.
 
@@ -369,6 +371,18 @@ See `.env.example` for the full reference.
 - **Agentless** (Xia et al., 2024, arXiv:2407.01489): Deterministic localize→repair→validate as safety net
 - **AutoCodeRover** (Zhang et al., ISSTA 2024, arXiv:2404.05427): AST-level context for cross-file repairs
 - **LATS** (Zhou et al., ICML 2024, arXiv:2310.04406): MCTS with value function over agent trajectories
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `400 Bad Request` on startup connectivity check | Model deprecated / renamed on provider | Matrioska warns and proceeds — update `MATRIOSKA_MODEL` if generation also fails |
+| `401 Unauthorized` | Invalid API key | Check `MATRIOSKA_API_KEY` in `.env` |
+| `404 Not Found` | Wrong model name for this provider | Check `MATRIOSKA_MODEL`; run `matrioska init` to pick from known models |
+| All slots on cooldown | Hit rate limits on all keys | Add more API keys via `MATRIOSKA_API_KEYS=key1,key2,...` |
+| ChromaDB ImportError | Optional dep not installed | `pip install chromadb` or disable embeddings (keyword-only fallback activates automatically) |
+| `mcp` not found | Optional dep | `pip install mcp` or omit `serve` subcommand |
+| Dashboard flicker / CI failure | Rich not compatible with non-TTY | Add `--no-dashboard` flag |
 
 ## License
 

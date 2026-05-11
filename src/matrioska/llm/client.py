@@ -354,6 +354,20 @@ class LLMClient:
             return self._openai_compatible_chat(
                 messages, json_mode, None, None, provider, spec
             )
+        if r.status_code == 400:
+            # Surface the provider's JSON error body (often more informative than
+            # the generic HTTPStatusError message, e.g. "organization_restricted").
+            try:
+                body = r.json()
+                err_msg = (body.get("error") or {}).get("message", "")
+                err_code = (body.get("error") or {}).get("code", "")
+                detail = f" ({err_code}: {err_msg})" if err_msg else ""
+            except Exception:
+                detail = f" ({r.text[:200]})" if r.text else ""
+            raise _RetriableError(
+                f"HTTP 400 Bad Request{detail}\n"
+                f"  Provider: {provider} | Model: {spec.model} | URL: {r.url}"
+            )
 
         r.raise_for_status()
         data = r.json()

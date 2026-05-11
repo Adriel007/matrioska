@@ -286,13 +286,12 @@ class Matrioska:
                     model=spec.model,
                     base_url=spec.base_url,
                     api_key=spec.api_key,
-                    max_tokens=5,
+                    max_tokens=32,
                     temperature=0.0,
                 )
                 self.llm.chat(
-                    messages=[{"role": "user", "content": "OK"}],
+                    messages=[{"role": "user", "content": "Reply with OK"}],
                     model_spec=probe_spec,
-                    system="Reply with exactly: OK",
                 )
             except Exception as e:
                 msg = str(e).lower()
@@ -301,7 +300,7 @@ class Matrioska:
                         f"API key rejected by {spec.provider} ({spec.base_url}). "
                         f"Check MATRIOSKA_API_KEY or --api-key.\n  Error: {e}"
                     ) from e
-                if "404" in msg or "not found" in msg or "model" in msg:
+                if "404" in msg or "not found" in msg:
                     raise RuntimeError(
                         f"Model '{spec.model}' not found on {spec.provider} ({spec.base_url}). "
                         f"Check MATRIOSKA_MODEL or --model.\n  Error: {e}"
@@ -312,8 +311,22 @@ class Matrioska:
                         f"Check MATRIOSKA_BASE_URL, network, or firewall.\n  Error: {e}"
                     ) from e
                 if "429" in msg or "rate limit" in msg:
+                    logger.warning("Rate limited during connectivity check — proceeding anyway")
+                    return
+                if "organization_restricted" in msg or "account" in msg and "restrict" in msg:
+                    raise RuntimeError(
+                        f"Provider account restricted ({spec.provider}). "
+                        f"Contact {spec.provider} support.\n  Error: {e}"
+                    ) from e
+                if "400" in msg or "bad request" in msg:
+                    # 400 during a minimal probe may indicate a deprecated/renamed model
+                    # or provider-specific payload restrictions. Warn but don't block —
+                    # the real pipeline call will surface a clearer error if needed.
                     logger.warning(
-                        "Rate limited during connectivity check — proceeding anyway"
+                        "Connectivity probe got 400 for %s/%s — possible account/model issue. "
+                        "Proceeding; pipeline will surface a clearer error if needed.\n"
+                        "  Error: %s",
+                        spec.provider, spec.model, e,
                     )
                     return
                 raise RuntimeError(
