@@ -79,11 +79,69 @@
   embeddings. Show a progress bar and consider making embeddings optional
   (keyword-only fallback).
 
+## CLI & Interactive REPL (Claude Code-inspired)
+
+*Executar `matrioska` sem subcomando abre um REPL interativo — prompt simples de
+conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.*
+
+- [ ] **REPL interativo** — `matrioska` sem args abre um loop de pergunta-resposta
+  com o orquestrador como agente. Suporte a multiline (`\`+Enter), histórico de
+  comandos (↑/↓), Ctrl+C para cancelar geração, Ctrl+D para sair. Usar `prompt_toolkit`
+  ou `readline` para edição de linha rica.
+
+- [ ] **Slash commands no REPL** — Dispatcher de `/comando` no REPL:
+  - `/model [nome]`     — trocar modelo mid-session; sem args mostra picker interativo
+  - `/config`           — exibir config atual (provider, model, flags, work_dir)
+  - `/usage`            — tokens usados na sessão, custo estimado, rate limit status por slot
+  - `/context`          — tamanho do contexto atual vs. limite do modelo
+  - `/clear`            — nova sessão, mantém memória do projeto
+  - `/plan`             — ativa plan mode (Architect planeja, não gera)
+  - `/memory`           — ver e editar MATRIOSKA.md + auto-memory persistente
+  - `/init`             — gerar MATRIOSKA.md para o projeto atual com scaffold
+  - `/review`           — code review read-only dos últimos artefatos gerados
+  - `/diff`             — o que mudou nesta sessão (artefatos gerados vs. existentes)
+  - `/compact`          — comprimir histórico de conversa (manter só resumo)
+  - `/slots`            — status do SlotPool em tempo real (disponível/cooldown)
+  - `/help`             — listar todos os comandos disponíveis
+
+- [ ] **`!` prefix para shell** — no REPL, `!ls -la` executa o comando e injeta o
+  output no contexto do agente. Permite inspecionar o projeto sem sair do REPL.
+
+- [ ] **Effort levels** — `/effort low|medium|high` (ou `--effort` no CLI) controla
+  o quanto o Architect "pensa": low=1 candidato sem ToT, medium=3 candidatos,
+  high=5 candidatos + Judge + Reflexion completo.
+
+- [ ] **Plan mode interativo** — `/plan` no REPL entra em modo onde o agente só planeja
+  (mostra arquitetura proposta) e aguarda aprovação antes de gerar. `y` executa,
+  `n` cancela, `e` edita o plano antes de executar.
+
+- [ ] **Rewind / checkpoint** — no REPL, `Esc+Esc` ou `/rewind` volta ao último
+  checkpoint salvo (desfaz geração da última rodada). StateGraph já tem checkpoints —
+  falta expor no REPL.
+
+- [ ] **Comandos customizados** — arquivos `.matrioska/commands/meu-cmd.md` criam
+  `/meu-cmd` como slash command no REPL. Conteúdo do arquivo vira prompt injetado.
+  Permite criar workflows reutilizáveis por projeto.
+
+- [ ] **`/btw` — pergunta rápida sem histórico** — `/btw o que faz esse arquivo?`
+  faz um call ao LLM sem adicionar a pergunta/resposta ao contexto da sessão.
+  Útil para consultas pontuais que não devem "poluir" o contexto da task.
+
+- [ ] **Hook system** — `.matrioska/hooks/` com scripts shell executados em eventos:
+  `pre_generate` (antes de gerar um arquivo), `post_generate` (após geração),
+  `pre_repair` (antes de repair), `session_start`, `session_end`. Scripts recebem
+  JSON via stdin com contexto do evento.
+
+- [ ] **Permission modes** — `--mode auto|plan|ask` controla nível de autonomia:
+  `ask`=aprova cada arquivo antes de gerar (default), `plan`=só planeja,
+  `auto`=gera tudo sem perguntar. Equivalente ao `acceptEdits`/`bypassPermissions`
+  do Claude Code.
+
 ## CLI & DX
 
-- [ ] **Progress display** — The current pipeline is silent except for log lines.
-  Add a Rich-based live display showing: current phase, files generated/remaining,
-  token usage, estimated cost, ETA.
+- [x] **Progress display** — Rich live dashboard implementado: painel de API slots
+  com cooldowns em tempo real, progress bar de arquivos, tokens/custo, log de eventos.
+  `matrioska run` usa dashboard por default; `--no-dashboard` para logs simples.
 
 - [ ] **`--quick` mode** — Skips ToT, reflexion, contract validation in Phase 2,
   and Phase 3 entirely. Useful for rapid iteration during development.
