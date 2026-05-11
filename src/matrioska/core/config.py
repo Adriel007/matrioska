@@ -109,6 +109,18 @@ class Config:
     otel_endpoint: str = ""
     enable_cost_tracking: bool = True
 
+    # ── Incremental / surgical mode ───────────────────────────────────────
+    # incremental=True: pre-flight scans existing files and injects them into
+    #   the Architect context so it generates only what needs to change.
+    # project_dir: path to the existing project to read (default: work_dir).
+    # execute_feedback=True: after each file is generated, run it in a
+    #   subprocess and feed stderr back to the Repairer as repair signal.
+    # install_deps=True: after Phase 2, auto-install detected pip packages.
+    incremental: bool = False
+    project_dir: str = ""
+    execute_feedback: bool = True
+    install_deps: bool = True
+
     # ── Misc ──────────────────────────────────────────────────────────────
     thinking: bool = False
     dry_run: bool = False
@@ -184,6 +196,7 @@ _BOOL_FLAGS = {
     "enable_tot", "enable_reflexion", "enable_debate",
     "enable_test_design", "use_aci_repair",
     "enable_sandbox", "enable_graphrag", "enable_otel", "enable_cost_tracking",
+    "incremental", "execute_feedback", "install_deps",
 }
 _INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",
                "architect_candidates", "sandbox_timeout"}

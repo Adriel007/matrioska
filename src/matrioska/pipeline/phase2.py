@@ -32,6 +32,7 @@ from matrioska.agents.reflector import ReflectorAgent
 from matrioska.agents.test_designer import TestDesignerAgent, run_tests_inline
 from matrioska.llm.client import LLMClient
 from matrioska.pipeline.graph import compute_layers
+from matrioska.pipeline.executor import execute_artifact, write_artifacts_to_disk
 
 logger = logging.getLogger("matrioska.pipeline.phase2")
 
@@ -199,6 +200,20 @@ def _generate_file(
         if reflection_hint:
             spec.details += f"\n{reflection_hint}"
 
+    # Surgical editing (incremental mode): inject existing file content so
+    # the generator can edit-in-place instead of writing from scratch
+    if cfg.incremental:
+        existing_path = cfg.work_dir / f"{spec.name}.{spec.extension}"
+        if existing_path.exists():
+            existing_content = existing_path.read_text(encoding="utf-8", errors="ignore")
+            context["_existing_content"] = existing_content
+            spec.details += (
+                f"\n\nEXISTING FILE CONTENT (modify only what the task requires — "
+                f"do NOT rewrite unchanged parts):\n```{spec.extension}\n"
+                f"{existing_content[:4000]}\n```"
+            )
+            logger.info("  Incremental: injecting existing %s (%d chars)", spec.filename, len(existing_content))
+
     # Handle complex files via nested Matrioska
     if spec.complex and depth < cfg.max_depth:
         logger.info(
@@ -247,7 +262,6 @@ def _generate_file(
 
         if result.ok:
             # AlphaCodium: run designer tests inline as smoke check.
-            # Failures become repair signal on the next attempt (capped to 1 test-repair).
             last_test_failures = []
             if designer_tests and spec.extension == "py" and attempt < cfg.max_repairs:
                 tests_ok, last_test_failures = _run_designer_tests(
@@ -259,19 +273,13 @@ def _generate_file(
                         len(last_test_failures), spec.filename,
                     )
                     last_errors = [f"Interface test failed: {f}" for f in last_test_failures]
-                    continue  # trigger repair on next loop iteration
+                    continue
 
-            # Auto-populate shared_state from declared writes so downstream
-            # files can reference them even if the generator didn't emit
-            # explicit shared_state_updates via the finish tool.
+            # Auto-populate shared_state
             for k in spec.shared_state_writes:
                 if k not in state.shared_state:
                     state.shared_state[k] = updates.get(k, f"__auto__{k}__")
             state.update_shared_state(updates)
-            state.log(
-                f"Generated {spec.filename} (attempt {attempt + 1}, "
-                f"{len(content)} chars, {time.time() - t0:.1f}s)"
-            )
 
             artifact = FileArtifact(
                 name=spec.name,
@@ -282,6 +290,27 @@ def _generate_file(
                 status="done",
                 repair_count=attempt,
                 generation_tokens=0,
+            )
+
+            # Write to disk so downstream files can import this one
+            _write_artifact_to_disk(artifact, cfg)
+
+            # Real execution feedback (Claude Code-inspired)
+            if cfg.execute_feedback and spec.extension == "py" and attempt < cfg.max_repairs:
+                exec_result = execute_artifact(artifact, cfg.work_dir)
+                if not exec_result.ok and not exec_result.skipped:
+                    err = exec_result.error_for_repair
+                    logger.info(
+                        "  Execution error in %s — queuing repair:\n    %s",
+                        spec.filename, err[:200],
+                    )
+                    last_errors = [f"Runtime error: {err}"]
+                    last_test_failures = []
+                    continue  # trigger repair with real stderr
+
+            state.log(
+                f"Generated {spec.filename} (attempt {attempt + 1}, "
+                f"{len(content)} chars, {time.time() - t0:.1f}s)"
             )
 
             # Reflexion
@@ -355,6 +384,15 @@ def _run_designer_tests(
             return run_tests_inline(tests_code, tmpdir)
     except Exception as e:
         return False, [f"test runner error: {e}"]
+
+
+def _write_artifact_to_disk(artifact: FileArtifact, cfg: Config) -> None:
+    """Write a done artifact to work_dir so subsequent files can import it."""
+    try:
+        path = cfg.work_dir / f"{artifact.name}.{artifact.extension}"
+        path.write_text(artifact.content, encoding="utf-8")
+    except Exception as e:
+        logger.debug("Could not write %s to disk: %s", artifact.filename, e)
 
 
 def _nested_generate(

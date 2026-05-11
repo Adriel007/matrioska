@@ -111,12 +111,14 @@ class ArchitectAgent:
         episodic: Optional[EpisodicMemory] = None,
         procedural: Optional[ProceduralMemory] = None,
         bus: Optional[EventBus] = None,
+        preflight_context: Optional[str] = None,
     ):
         self.cfg = cfg
         self.llm = llm
         self.episodic = episodic
         self.procedural = procedural
         self.bus = bus
+        self.preflight_context = preflight_context  # injected by orchestrator
 
     def plan(self, task: str) -> Optional[Architecture]:
         """Generate an architecture plan (with optional ToT voting)."""
@@ -192,6 +194,13 @@ class ArchitectAgent:
                 memory_parts.append(rendered)
 
         memory_section = "\n\n".join(memory_parts)
+
+        # Inject pre-flight context (CLAUDE.md + existing codebase)
+        if self.preflight_context:
+            memory_section = (
+                self.preflight_context
+                + ("\n\n" + memory_section if memory_section else "")
+            )
 
         prompt = ARCHITECT_SYSTEM_PROMPT.replace(
             "{project_memory_section}", memory_section

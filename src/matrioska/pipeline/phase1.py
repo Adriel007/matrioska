@@ -28,10 +28,12 @@ def run_phase1(
     episodic: Optional[EpisodicMemory] = None,
     procedural: Optional[ProceduralMemory] = None,
     bus: Optional[EventBus] = None,
+    preflight_context: Optional[str] = None,
 ) -> bool:
     """Execute Phase 1: Architecture planning.
 
     Modifies state in place. Returns True if a valid architecture was produced.
+    preflight_context: optional block from pre-flight (MATRIOSKA.md + existing code).
     """
     logger.info("=== Phase 1: Architecture ===")
     state.status = PipelineStatus.PLANNING
@@ -42,6 +44,7 @@ def run_phase1(
         episodic=episodic,
         procedural=procedural,
         bus=bus,
+        preflight_context=preflight_context,
     )
 
     # Retrieve relevant past runs for context

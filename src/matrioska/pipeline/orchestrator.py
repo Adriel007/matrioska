@@ -36,6 +36,8 @@ from matrioska.memory.procedural import ProceduralMemory
 from matrioska.pipeline.phase1 import run_phase1
 from matrioska.pipeline.phase2 import run_phase2
 from matrioska.pipeline.phase3 import run_phase3
+from matrioska.pipeline.preflight import run_preflight
+from matrioska.pipeline.executor import install_missing_deps, write_artifacts_to_disk
 
 logger = logging.getLogger("matrioska.orchestrator")
 
@@ -112,11 +114,22 @@ class Matrioska:
         if not self.cfg.dry_run and self.cfg.provider in ("openai", "anthropic"):
             self._check_connectivity()
 
+        # ── Pre-flight: read MATRIOSKA.md + scan existing code ─────────
+        project_dir = Path(self.cfg.project_dir) if self.cfg.project_dir else None
+        preflight = run_preflight(self.work_dir, project_dir=project_dir)
+        if preflight.has_instructions:
+            logger.info("Pre-flight: user instructions loaded from %s", preflight.instructions_source)
+        if preflight.has_existing_code:
+            logger.info("Pre-flight: %s", preflight.existing_summary)
+
         # ── Phase 1: Architecture ──────────────────────────────────────
         state = self.graph.new_run(task)
+        # Inject pre-flight context into the Architect
+        self._preflight = preflight
 
         if not run_phase1(
-            state, self.cfg, self.llm, self.episodic, self.procedural, self.bus
+            state, self.cfg, self.llm, self.episodic, self.procedural, self.bus,
+            preflight_context=preflight.architect_context_block() or None,
         ):
             self._write_note(task, state, started, t0, "failed")
             return self._result(state, "failed")
@@ -131,6 +144,13 @@ class Matrioska:
         # ── Phase 2: Generation ────────────────────────────────────────
         gen_ok = run_phase2(state, self.cfg, self.llm, self.bus, self.depth)
         self.graph.save_checkpoint(label="after_generation")
+
+        # ── Dep install + final disk write ─────────────────────────────
+        write_artifacts_to_disk(state.artifacts, self.work_dir)
+        if self.cfg.install_deps:
+            installed = install_missing_deps(state.artifacts, self.work_dir)
+            if installed:
+                logger.info("Installed deps: %s", ", ".join(installed))
 
         # ── Phase 3: Verification ──────────────────────────────────────
         verify_results = run_phase3(state, self.cfg, self.bus, self.metrics)

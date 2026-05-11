@@ -146,37 +146,37 @@
 
 Diferenciais do Claude Code que a Matrioska não tem e valem implementar:
 
-- [ ] **Real code execution feedback loop** — O diferencial central: Claude Code executa
-  o código gerado, captura stdout/stderr, e usa o erro real como sinal de repair.
-  A Matrioska só valida sintaxe (AST parse). Wiring: ao final de cada arquivo gerado,
-  rodar em subprocess com timeout; se exitcode != 0, passar stderr para o Repairer como
-  `test_failures`. Isso elimina a necessidade do TestDesigner para validação funcional.
+- [x] **Real code execution feedback loop** — Após cada arquivo .py gerado e aprovado
+  na validação sintática, roda `python -c "import <module>"` em subprocess com timeout
+  de 8s. Se returncode != 0, o stderr vira sinal de repair no próximo attempt. Servidores
+  (uvicorn, flask.run, etc.) são detectados e pulados para evitar hang. Config:
+  `execute_feedback=True` (default). Arquivos são escritos em disco via `_write_artifact_to_disk`
+  logo após geração para que imports resolvam corretamente.
 
-- [ ] **Codebase pre-flight** — Claude Code lê o projeto existente antes de começar.
-  A Matrioska começa cega. Adicionar uma fase 0 que lê `work_dir` e injeta arquivos
-  existentes no shared_state: nomes, assinaturas de função, schemas de DB.
-  Crítico para tarefas de incremento (add feature, fix bug) onde o projeto já existe.
+- [x] **Codebase pre-flight** — `pipeline/preflight.py`: antes de Phase 1, escaneia
+  `work_dir` (ou `project_dir`) por arquivos existentes (.py, .ts, .js, .go, etc.) e
+  constrói um bloco de contexto injetado no Architect. Limite: 24K chars total, 3K por
+  arquivo. Ignora .venv, node_modules, __pycache__, .git, etc.
 
-- [ ] **Surgical file editing (diff-based)** — Claude Code edita linhas específicas com
-  Edit/Write. A Matrioska regenera o arquivo inteiro. O ACI repair vai na direção certa
-  mas só é ativado no repair loop. Estender para: se o arquivo já existe em work_dir,
-  gerar um diff-patch em vez de arquivo completo.
+- [x] **Surgical file editing (incremental mode)** — `cfg.incremental=True`: antes de
+  gerar um arquivo, verifica se ele já existe em `work_dir`. Se sim, injeta o conteúdo
+  existente no prompt do Generator com instrução de modificar apenas o necessário.
+  Funciona como "in-place edit" para modelos que suportam JSON mode ou tool use.
 
-- [ ] **Real dependency installation** — Claude Code pode rodar `pip install`, `npm i`,
-  `go get`. A Matrioska gera código mas não instala deps. Adicionar um Phase 3.5 que
-  lê os `import` dos arquivos gerados, detecta pacotes não-stdlib, e roda `pip install`
-  antes de executar os testes. Requer sandbox ou venv isolado.
+- [x] **Real dependency installation** — `pipeline/executor.py`: após Phase 2, detecta
+  imports não-stdlib nos .py gerados (via AST parse, fallback regex), e roda `pip install -q`
+  em subprocess. Aliases conhecidos: cv2→opencv-python, PIL→Pillow, etc. Config:
+  `install_deps=True` (default). Best-effort: falhas são logadas mas não travam a pipeline.
 
-- [ ] **CLAUDE.md / project context injection** — Claude Code lê CLAUDE.md para
-  entender convenções do projeto. Adicionar suporte a um arquivo `MATRIOSKA.md` (ou
-  ler o CLAUDE.md se presente) e injetar no system prompt do Architect. Permite ao
-  usuário definir: linguagem preferida, padrões de código, restrições de deps.
+- [x] **CLAUDE.md / MATRIOSKA.md injection** — `pipeline/preflight.py`: antes de Phase 1,
+  procura `MATRIOSKA.md` ou `CLAUDE.md` em `project_dir` → `work_dir` → `cwd`. O conteúdo
+  é injetado no system prompt do Architect como "USER INSTRUCTIONS", permitindo definir
+  convenções, linguagens preferidas, restrições de deps.
 
-- [ ] **Incremental task mode** — Claude Code trata "add feature X" diferente de
-  "build from scratch". A Matrioska sempre recomeça do zero. Adicionar modo
-  `--task-type=increment` que: (1) lê arquivos existentes, (2) passa para o Architect
-  como contexto, (3) gera apenas os arquivos que precisam mudar. Diferença entre
-  phase1 atual e phase1 com diff-awareness.
+- [x] **Incremental task mode** — `cfg.incremental=True` + `cfg.project_dir=<path>`:
+  combina pre-flight (injeta código existente no Architect) com surgical editing (injeta
+  arquivo existente no Generator). O Architect recebe o codebase atual e pode decidir
+  gerar apenas os arquivos que precisam mudar.
 
 - [ ] **Streaming output / live progress** — Claude Code mostra o código sendo gerado
   em tempo real. A Matrioska é silenciosa (só logs). Adicionar streaming opcional:
