@@ -3,15 +3,21 @@ Circuit breaker & provider failover (§4.2).
 
 Protects against cascading failures when a provider is degraded:
   Closed → (failures ≥ threshold) → Open → (timeout) → HalfOpen → Closed
+
+SlotPool: multi-key / multi-endpoint rotation with per-slot cooldowns.
+  - Multiple API keys for the same endpoint: round-robin, skip keys on 429
+  - Extra endpoints (DeepSeek, XAI, Mistral…): fallback when all primary slots fail
+  - Retry-After header respected per key
 """
 
 from __future__ import annotations
 
+import re
 import threading
 import time
 from dataclasses import dataclass, field
 from enum import Enum
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 
 class CircuitState(str, Enum):
@@ -113,6 +119,194 @@ class ProviderRouter:
     @property
     def breacher_states(self) -> Dict[str, str]:
         return {p: b.state.value for p, b in self._breakers.items()}
+
+
+# ── Slot pool: multi-key / multi-endpoint rotation ───────────────────────────
+
+
+@dataclass
+class APISlot:
+    """One (provider, base_url, api_key, model) combination in the pool.
+
+    Tracks its own cooldown (rate limit) and failure count independently
+    so a single key being throttled doesn't block the whole pool.
+    """
+
+    provider: str
+    base_url: str
+    api_key: Optional[str]
+    model: str
+    label: str = ""
+
+    _cooldown_until: float = field(default=0.0, init=False, compare=False, repr=False)
+    _failure_count: int = field(default=0, init=False, compare=False, repr=False)
+    _lock: threading.Lock = field(
+        default_factory=threading.Lock, init=False, compare=False, repr=False
+    )
+
+    @property
+    def available(self) -> bool:
+        with self._lock:
+            return time.time() >= self._cooldown_until and self._failure_count < 5
+
+    @property
+    def cooldown_remaining(self) -> float:
+        with self._lock:
+            return max(0.0, self._cooldown_until - time.time())
+
+    def mark_rate_limited(self, retry_after: float = 60.0) -> None:
+        with self._lock:
+            self._cooldown_until = time.time() + retry_after
+        logger.debug("Slot %s on cooldown for %.0fs", self.label or self.api_key, retry_after)
+
+    def mark_failure(self) -> None:
+        with self._lock:
+            self._failure_count += 1
+            self._cooldown_until = time.time() + min(30.0 * self._failure_count, 300.0)
+
+    def mark_success(self) -> None:
+        with self._lock:
+            self._failure_count = 0
+            self._cooldown_until = 0.0
+
+    def as_model_spec(self, temperature: float, max_tokens: int, thinking: bool) -> Any:
+        from matrioska.core.config import ModelSpec
+        return ModelSpec(
+            provider=self.provider,
+            base_url=self.base_url,
+            api_key=self.api_key,
+            model=self.model,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            thinking=thinking,
+        )
+
+
+import logging
+logger = logging.getLogger("matrioska.llm.circuit")
+
+
+class SlotPool:
+    """Round-robin pool of APISlots with per-slot rate-limit cooldowns.
+
+    acquire() immediately returns the next available slot, skipping any
+    on cooldown. If all slots are cooling down, returns the soonest-ready
+    one together with the seconds to wait — letting the caller decide
+    whether to sleep or to raise.
+    """
+
+    def __init__(self, slots: List[APISlot]):
+        self._slots = slots
+        self._idx = 0
+        self._lock = threading.Lock()
+
+    @classmethod
+    def from_config(cls, cfg: "Any") -> "SlotPool":
+        """Build pool from Config: primary keys + extra endpoints."""
+        slots: List[APISlot] = []
+        primary_provider = cfg.provider
+        primary_base = cfg.base_url
+        primary_model = cfg.model
+
+        keys = cfg.parsed_api_keys()
+        if not keys and cfg.api_key:
+            keys = [cfg.api_key]
+
+        for i, key in enumerate(keys):
+            slots.append(APISlot(
+                provider=primary_provider,
+                base_url=primary_base,
+                api_key=key,
+                model=primary_model,
+                label=f"{primary_provider}[{i}]",
+            ))
+
+        for ep in cfg.parsed_extra_endpoints():
+            slots.append(APISlot(
+                provider=ep.get("provider", "openai"),
+                base_url=ep.get("base_url", primary_base),
+                api_key=ep.get("api_key") or cfg.api_key,
+                model=ep.get("model", primary_model),
+                label=ep.get("label", ep.get("provider", "extra")),
+            ))
+
+        if not slots:
+            slots.append(APISlot(
+                provider=primary_provider,
+                base_url=primary_base,
+                api_key=cfg.api_key,
+                model=primary_model,
+                label=primary_provider,
+            ))
+
+        logger.debug("SlotPool initialized with %d slot(s)", len(slots))
+        return cls(slots)
+
+    def acquire(self) -> Tuple[Optional[APISlot], float]:
+        """Return (slot, wait_seconds).
+
+        wait_seconds == 0 → slot is immediately ready.
+        wait_seconds > 0  → all slots on cooldown; this is the soonest one.
+        Returns (None, 0) only if all slots have permanent failures.
+        """
+        with self._lock:
+            n = len(self._slots)
+            if n == 0:
+                return None, 0.0
+
+            for _ in range(n):
+                slot = self._slots[self._idx % n]
+                self._idx += 1
+                if slot.available:
+                    return slot, 0.0
+
+            live = [s for s in self._slots if s._failure_count < 5]
+            if not live:
+                return None, 0.0
+            soonest = min(live, key=lambda s: s._cooldown_until)
+            return soonest, soonest.cooldown_remaining
+
+    def __len__(self) -> int:
+        return len(self._slots)
+
+    def status(self) -> List[Dict[str, Any]]:
+        return [
+            {
+                "label": s.label,
+                "provider": s.provider,
+                "model": s.model,
+                "available": s.available,
+                "cooldown_remaining": round(s.cooldown_remaining, 1),
+                "failures": s._failure_count,
+            }
+            for s in self._slots
+        ]
+
+
+def parse_retry_after(response_headers: Dict[str, str], body_text: str = "") -> float:
+    """Extract Retry-After seconds from a 429 response.
+
+    Checks (in order): Retry-After header, x-ratelimit-reset-requests,
+    then parses 'try again in Xs' patterns from the body.
+    """
+    for header in ("retry-after", "Retry-After", "x-ratelimit-reset-requests"):
+        val = response_headers.get(header)
+        if val:
+            try:
+                return float(val)
+            except ValueError:
+                pass
+
+    m = re.search(r"try again in (\d+(?:\.\d+)?)(ms|s)", body_text, re.I)
+    if m:
+        t = float(m.group(1))
+        return t / 1000.0 if m.group(2).lower() == "ms" else t
+
+    m = re.search(r"(\d+(?:\.\d+)?)\s*seconds?", body_text, re.I)
+    if m:
+        return float(m.group(1))
+
+    return 60.0
 
 
 # ── MoE-style routing by file extension ──────────────────────────────────────

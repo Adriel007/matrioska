@@ -89,6 +89,16 @@ class Config:
     embedder_model: str = "text-embedding-3-small"
     enable_graphrag: bool = False
 
+    # ── Multi-key / multi-endpoint rotation ──────────────────────────────────
+    # api_keys: comma-separated API keys for the primary provider (round-robin)
+    # extra_endpoints: JSON array {provider,base_url,api_key,model[,label]}
+    #   Use to add DeepSeek, XAI, Mistral, Together, etc. as extra fallback slots.
+    # Example .env:
+    #   MATRIOSKA_API_KEYS=gsk_key1,gsk_key2,gsk_key3
+    #   MATRIOSKA_EXTRA_ENDPOINTS=[{"provider":"deepseek","base_url":"https://api.deepseek.com/v1","api_key":"ds_xxx","model":"deepseek-coder-v2"}]
+    api_keys: str = ""
+    extra_endpoints: str = ""
+
     # ── Circuit breaker ───────────────────────────────────────────────────
     circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
     failover_providers: List[str] = field(default_factory=list)
@@ -126,6 +136,24 @@ class Config:
             max_tokens=self.max_tokens,
             thinking=self.thinking,
         )
+
+    def parsed_api_keys(self) -> List[str]:
+        """Return list of API keys from the comma-separated api_keys field."""
+        return [k.strip() for k in self.api_keys.split(",") if k.strip()]
+
+    def parsed_extra_endpoints(self) -> List[Dict[str, Any]]:
+        """Parse extra_endpoints JSON string into a list of dicts."""
+        raw = self.extra_endpoints.strip()
+        if not raw:
+            return []
+        import json
+        try:
+            result = json.loads(raw)
+            if isinstance(result, list):
+                return result
+        except (json.JSONDecodeError, ValueError):
+            pass
+        return []
 
     @property
     def effective_architect(self) -> ModelSpec:
@@ -208,19 +236,40 @@ def load_config(cli_overrides: Optional[Dict[str, Any]] = None) -> Config:
     if isinstance(cfg.work_dir, str):
         cfg.work_dir = Path(cfg.work_dir).expanduser()
 
-    # Provider-specific defaults
-    if cfg.provider == "ollama" and cfg.base_url == "https://api.openai.com/v1":
-        cfg.base_url = "http://localhost:11434"
-    if cfg.provider == "anthropic" and cfg.base_url == "https://api.openai.com/v1":
-        cfg.base_url = "https://api.anthropic.com"
+    # Provider-specific base_url defaults
+    _PROVIDER_DEFAULTS: Dict[str, str] = {
+        "ollama":    "http://localhost:11434",
+        "anthropic": "https://api.anthropic.com",
+        "deepseek":  "https://api.deepseek.com/v1",
+        "xai":       "https://api.x.ai/v1",
+        "mistral":   "https://api.mistral.ai/v1",
+        "together":  "https://api.together.xyz/v1",
+        "cohere":    "https://api.cohere.ai/v1",
+        "groq":      "https://api.groq.com/openai/v1",
+        "openrouter": "https://openrouter.ai/api/v1",
+        "nvidia":    "https://integrate.api.nvidia.com/v1",
+    }
+    default_url = "https://api.openai.com/v1"
+    if cfg.provider in _PROVIDER_DEFAULTS and cfg.base_url == default_url:
+        cfg.base_url = _PROVIDER_DEFAULTS[cfg.provider]
 
     return cfg
 
 
+_VALID_PROVIDERS = {
+    "openai", "ollama", "anthropic", "hf",
+    "deepseek", "xai", "mistral", "together", "cohere",
+    "groq", "openrouter", "nvidia",
+}
+
+
 def validate_config(cfg: Config) -> None:
     """Validate config; raises SystemExit on fatal issues."""
-    if cfg.provider not in ("openai", "ollama", "anthropic", "hf"):
-        raise SystemExit(f"Invalid provider: {cfg.provider}")
+    if cfg.provider not in _VALID_PROVIDERS:
+        raise SystemExit(
+            f"Invalid provider: {cfg.provider}. "
+            f"Valid: {', '.join(sorted(_VALID_PROVIDERS))}"
+        )
 
     local_markers = ("localhost", "127.0.0.1", "0.0.0.0", "::1")
     is_local = any(m in cfg.base_url for m in local_markers) or cfg.provider == "hf"

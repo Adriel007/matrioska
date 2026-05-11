@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional, Tuple
 
 from matrioska.core.config import Config, ModelSpec
 from matrioska.core.events import EventBus
-from matrioska.llm.circuit import ProviderRouter
+from matrioska.llm.circuit import ProviderRouter, SlotPool, APISlot, parse_retry_after
 
 logger = logging.getLogger("matrioska.llm")
 
@@ -111,6 +111,8 @@ class LLMClient:
     def __init__(self, cfg: Config, bus: Optional[EventBus] = None):
         self.cfg = cfg
         self.bus = bus
+        self._slot_pool = SlotPool.from_config(cfg)
+        # Keep ProviderRouter for backwards-compat (connectivity check etc.)
         self._router = ProviderRouter(cfg.provider, cfg.failover_providers)
         self._http: Any = None
         self._hf_llm: Any = None
@@ -125,97 +127,142 @@ class LLMClient:
         tools: Optional[List[Dict[str, Any]]] = None,
         system: Optional[str] = None,
     ) -> ChatResponse:
-        """Dispatch a chat request with circuit breaker protection.
+        """Dispatch a chat request through the slot pool.
 
-        Auto-retries on 429 (rate limit) with exponential backoff + jitter.
+        Rotates across API keys / extra endpoints automatically:
+          - 429 (rate limit): marks the slot with Retry-After cooldown, tries next slot
+          - Network / 5xx:    marks slot failure (backoff), tries next slot
+          - All slots busy:   waits for the soonest to become available, then retries
         """
-        import random
-
-        spec = model_spec or ModelSpec(
-            provider=self.cfg.provider,
-            model=self.cfg.model,
-            base_url=self.cfg.base_url,
-            api_key=self.cfg.api_key,
-            temperature=self.cfg.temperature,
-            max_tokens=self.cfg.max_tokens,
-        )
-
         if system:
             messages = [{"role": "system", "content": system}] + messages
 
-        provider = self._router.route()
-        if provider is None:
-            raise RuntimeError("All providers are unavailable (circuits open).")
-
         start_time = time.time()
+        max_attempts = len(self._slot_pool) * 2 + 3
         last_error: Optional[Exception] = None
 
-        for attempt in range(4):  # initial + 3 retries
+        for attempt in range(max_attempts):
+            slot, wait_s = self._slot_pool.acquire()
+
+            if slot is None:
+                raise RuntimeError(
+                    "All API slots have exceeded failure threshold. "
+                    "Check your API keys and provider status."
+                )
+
+            if wait_s > 0:
+                if attempt == 0:
+                    # No slot was immediately available on first try — wait for soonest
+                    logger.warning(
+                        "All slots on cooldown, waiting %.0fs for %s...",
+                        wait_s,
+                        slot.label,
+                    )
+                    time.sleep(wait_s)
+                else:
+                    # We've rotated through all slots; wait for the soonest
+                    logger.warning(
+                        "All %d slot(s) on cooldown after %d attempt(s); "
+                        "waiting %.0fs for %s...",
+                        len(self._slot_pool),
+                        attempt,
+                        wait_s,
+                        slot.label,
+                    )
+                    time.sleep(wait_s)
+
+            # Build effective spec: use slot's provider/base_url/api_key,
+            # but keep the caller's model/temperature/max_tokens if provided.
+            if model_spec:
+                effective = ModelSpec(
+                    provider=slot.provider,
+                    base_url=slot.base_url,
+                    api_key=slot.api_key,
+                    model=model_spec.model,
+                    temperature=model_spec.temperature,
+                    max_tokens=model_spec.max_tokens,
+                    thinking=model_spec.thinking,
+                )
+            else:
+                effective = ModelSpec(
+                    provider=slot.provider,
+                    base_url=slot.base_url,
+                    api_key=slot.api_key,
+                    model=slot.model,
+                    temperature=self.cfg.temperature,
+                    max_tokens=self.cfg.max_tokens,
+                    thinking=self.cfg.thinking,
+                )
+
             try:
-                if provider == "hf":
-                    resp = self._hf_chat(messages, json_mode, spec)
-                elif provider == "ollama":
-                    resp = self._ollama_chat(messages, json_mode, spec)
-                elif provider == "anthropic":
+                if effective.provider == "hf":
+                    resp = self._hf_chat(messages, json_mode, effective)
+                elif effective.provider == "ollama":
+                    resp = self._ollama_chat(messages, json_mode, effective)
+                elif effective.provider == "anthropic":
                     resp = self._anthropic_chat(
-                        messages, json_mode, json_schema, tools, spec
+                        messages, json_mode, json_schema, tools, effective
                     )
                 else:
                     resp = self._openai_compatible_chat(
-                        messages,
-                        json_mode,
-                        json_schema,
-                        tools,
-                        provider,
-                        spec,
+                        messages, json_mode, json_schema, tools,
+                        effective.provider, effective,
                     )
 
-                resp.provider = provider
-                resp.model = spec.model
-
-                self._router.mark_success(provider)
+                resp.provider = effective.provider
+                resp.model = effective.model
+                slot.mark_success()
                 self._emit(
                     "llm_done",
-                    provider=provider,
-                    model=spec.model,
+                    provider=effective.provider,
+                    model=effective.model,
+                    slot=slot.label,
                     prompt_tokens=resp.prompt_tokens,
                     completion_tokens=resp.completion_tokens,
                     elapsed_s=round(time.time() - start_time, 2),
                 )
                 return resp
 
+            except _RateLimitError as e:
+                last_error = e
+                slot.mark_rate_limited(e.retry_after)
+                self._emit(
+                    "llm_rate_limited",
+                    slot=slot.label,
+                    retry_after=e.retry_after,
+                    attempt=attempt + 1,
+                )
+                logger.warning(
+                    "Rate limit on %s (cooldown %.0fs), rotating to next slot…",
+                    slot.label,
+                    e.retry_after,
+                )
+                continue  # Immediately try next slot, no sleep here
+
             except _RetriableError as e:
                 last_error = e
-                is_429 = "429" in str(e)
-                if is_429 and attempt < 3:
-                    delay = (2 ** (attempt + 1)) + random.random() * 2
-                    logger.warning(
-                        "Rate limited (attempt %d/3), retrying in %.1fs...",
-                        attempt + 1,
-                        delay,
-                    )
-                    time.sleep(delay)
-                    continue
-                self._router.mark_failure(provider)
-                self._emit("llm_retriable_error", provider=provider, error=str(e))
+                slot.mark_failure()
+                self._emit("llm_retriable_error", slot=slot.label, error=str(e))
                 msg = str(e)
-                hint = ""
-                if "401" in msg or "unauthorized" in msg:
-                    hint = " → Check MATRIOSKA_API_KEY in .env"
-                elif "404" in msg or "not found" in msg:
-                    hint = f" → Check MATRIOSKA_MODEL (current: {spec.model})"
-                elif "connection" in msg.lower() or "refused" in msg.lower():
-                    hint = f" → Check MATRIOSKA_BASE_URL ({spec.base_url})"
-                elif "429" in msg or "rate limit" in msg.lower():
-                    hint = " → Wait for rate limit reset or switch provider"
-                raise RuntimeError(f"LLM call failed ({provider}/{spec.model}): {e}{hint}") from e
+                hint = _error_hint(msg, effective)
+                logger.warning(
+                    "Retriable error on %s (attempt %d): %s%s",
+                    slot.label, attempt + 1, msg[:120], hint,
+                )
+                if attempt < len(self._slot_pool):
+                    continue  # Try next slot
+                raise RuntimeError(
+                    f"LLM call failed ({effective.provider}/{effective.model}): {e}{hint}"
+                ) from e
 
             except Exception as e:
-                self._router.mark_failure(provider)
-                self._emit("llm_fatal_error", provider=provider, error=str(e))
+                slot.mark_failure()
+                self._emit("llm_fatal_error", slot=slot.label, error=str(e))
                 raise
 
-        raise RuntimeError(f"LLM call failed ({provider}): {last_error}") from last_error
+        raise RuntimeError(
+            f"LLM call failed after {max_attempts} attempt(s): {last_error}"
+        ) from last_error
 
     # ── Provider implementations ─────────────────────────────────────────
 
@@ -262,7 +309,11 @@ class LLMClient:
         except (httpx.ConnectError, httpx.ReadTimeout, httpx.RemoteProtocolError) as e:
             raise _RetriableError(f"network: {e}")
 
-        if r.status_code in (408, 425, 429, 500, 502, 503, 504):
+        if r.status_code == 429:
+            retry_after = parse_retry_after(dict(r.headers), r.text)
+            raise _RateLimitError(f"HTTP 429: {r.text[:200]}", retry_after=retry_after)
+
+        if r.status_code in (408, 425, 500, 502, 503, 504):
             raise _RetriableError(f"HTTP {r.status_code}: {r.text[:200]}")
 
         if r.status_code == 401:
@@ -391,7 +442,11 @@ class LLMClient:
         except (httpx.ConnectError, httpx.ReadTimeout) as e:
             raise _RetriableError(f"network: {e}")
 
-        if r.status_code in (408, 425, 429, 500, 502, 503, 504):
+        if r.status_code == 429:
+            retry_after = parse_retry_after(dict(r.headers), r.text)
+            raise _RateLimitError(f"HTTP 429: {r.text[:200]}", retry_after=retry_after)
+
+        if r.status_code in (408, 425, 500, 502, 503, 504):
             raise _RetriableError(f"HTTP {r.status_code}: {r.text[:200]}")
         r.raise_for_status()
 
@@ -452,7 +507,11 @@ class LLMClient:
         except (httpx.ConnectError, httpx.ReadTimeout) as e:
             raise _RetriableError(f"network: {e}")
 
-        if r.status_code in (429, 500, 502, 503, 504):
+        if r.status_code == 429:
+            retry_after = parse_retry_after(dict(r.headers), r.text)
+            raise _RateLimitError(f"HTTP 429: {r.text[:200]}", retry_after=retry_after)
+
+        if r.status_code in (500, 502, 503, 504):
             raise _RetriableError(f"HTTP {r.status_code}: {r.text[:200]}")
         r.raise_for_status()
 
@@ -509,6 +568,25 @@ def _extract_tool_calls_openai(raw: list) -> List[ToolCall]:
 
 
 class _RetriableError(RuntimeError):
-    """An error that should trigger circuit breaker and retry logic."""
-
+    """An error that should trigger retry / slot rotation."""
     pass
+
+
+class _RateLimitError(_RetriableError):
+    """HTTP 429: rate limited — rotate to next slot immediately, no sleep."""
+
+    def __init__(self, message: str, retry_after: float = 60.0):
+        super().__init__(message)
+        self.retry_after = retry_after
+
+
+def _error_hint(msg: str, spec: ModelSpec) -> str:
+    if "401" in msg or "unauthorized" in msg:
+        return " → Check MATRIOSKA_API_KEY in .env"
+    if "404" in msg or "not found" in msg:
+        return f" → Check MATRIOSKA_MODEL (current: {spec.model})"
+    if "connection" in msg.lower() or "refused" in msg.lower():
+        return f" → Check MATRIOSKA_BASE_URL ({spec.base_url})"
+    if "429" in msg or "rate limit" in msg.lower():
+        return " → Add more keys via MATRIOSKA_API_KEYS or MATRIOSKA_EXTRA_ENDPOINTS"
+    return ""
