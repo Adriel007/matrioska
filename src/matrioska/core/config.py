@@ -133,6 +133,13 @@ class Config:
     enable_vault: bool = True
     vault_dir: str = ""  # default: ~/.matrioska/vault
 
+    # ── Multi-planning ────────────────────────────────────────────────────
+    # enable_multi_plan=True: before Phase 1, a MetaPlanner decomposes the task
+    # into N sub-domains (2-4). Each sub-domain gets its own scoped ArchitectAgent
+    # call, and the results are merged into one Architecture. Better decomposition
+    # for complex multi-component tasks; costs +1 LLM call.
+    enable_multi_plan: bool = False
+
     # ── Streaming ─────────────────────────────────────────────────────────
     # stream_tokens=True: openai-compatible chat uses SSE and emits per-chunk
     # `llm_token` events through the event bus. Token deltas are accumulated
@@ -215,7 +222,7 @@ _BOOL_FLAGS = {
     "enable_test_design", "use_aci_repair",
     "enable_sandbox", "enable_graphrag", "enable_otel", "enable_cost_tracking",
     "incremental", "execute_feedback", "install_deps",
-    "quick", "enable_vault", "stream_tokens",
+    "quick", "enable_vault", "stream_tokens", "enable_multi_plan",
 }
 _INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",
                "architect_candidates", "sandbox_timeout"}

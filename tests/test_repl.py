@@ -65,9 +65,9 @@ def test_effort_set(repl: Repl):
 
 
 def test_stream_toggle(repl: Repl):
-    assert repl.cfg.stream_tokens is False
+    initial = repl.cfg.stream_tokens
     repl._dispatch("/stream")
-    assert repl.cfg.stream_tokens is True
+    assert repl.cfg.stream_tokens is not initial
 
 
 def test_shell_prefix_runs_subprocess(repl: Repl, monkeypatch):

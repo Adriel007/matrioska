@@ -8,7 +8,7 @@ produce diverse plans, then a Judge evaluates and selects the best.
 from __future__ import annotations
 
 import logging
-from typing import Optional
+from typing import Any, Optional
 
 from matrioska.core.config import Config
 from matrioska.core.events import EventBus
@@ -38,14 +38,20 @@ def run_phase1(
     logger.info("=== Phase 1: Architecture ===")
     state.status = PipelineStatus.PLANNING
 
-    architect = ArchitectAgent(
-        cfg=cfg,
-        llm=llm,
-        episodic=episodic,
-        procedural=procedural,
-        bus=bus,
-        preflight_context=preflight_context,
-    )
+    if cfg.enable_multi_plan:
+        from matrioska.agents.multi_planner import MultiPlanner
+        planner: Any = MultiPlanner(
+            cfg=cfg, llm=llm, bus=bus,
+            episodic=episodic, procedural=procedural,
+            preflight_context=preflight_context,
+        )
+        logger.info("Multi-planning enabled — running meta-decomposition first")
+    else:
+        planner = ArchitectAgent(
+            cfg=cfg, llm=llm,
+            episodic=episodic, procedural=procedural,
+            bus=bus, preflight_context=preflight_context,
+        )
 
     # Retrieve relevant past runs for context
     if episodic:
@@ -53,7 +59,7 @@ def run_phase1(
         if past_notes:
             state.log(f"Retrieved {len(past_notes)} relevant past runs")
 
-    arch = architect.plan(state.task)
+    arch = planner.plan(state.task)
 
     if arch is None:
         logger.error("Architecture phase failed — all candidates were invalid")

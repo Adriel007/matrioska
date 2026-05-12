@@ -109,7 +109,18 @@ class Repl:
         self._print(_BANNER)
         self._print_status_line()
         get_input = self._build_input_reader()
+        self._fire_hook("session_start", {"provider": self.cfg.provider, "model": self.cfg.model})
 
+        try:
+            return self._run_loop(get_input)
+        finally:
+            self._fire_hook("session_end", {
+                "tokens_prompt": self.session.tokens_session["prompt"],
+                "tokens_completion": self.session.tokens_session["completion"],
+                "history_len": len(self.session.history),
+            })
+
+    def _run_loop(self, get_input: Callable[[], Optional[str]]) -> int:
         while True:
             try:
                 raw = get_input()
@@ -272,16 +283,49 @@ class Repl:
 
     # ── Input ──────────────────────────────────────────────────────────────
 
+    def _build_completer(self) -> Any:
+        """Build a NestedCompleter for slash commands and their sub-arguments."""
+        try:
+            from prompt_toolkit.completion import NestedCompleter
+        except ImportError:
+            return None
+
+        vault_sub = {"list": None, "search": None, "doctor": None, "graph": None}
+        effort_sub = {"low": None, "medium": None, "high": None}
+
+        # Build from registered COMMANDS so it stays in sync automatically
+        slash_map: Dict[str, Any] = {}
+        sub_args: Dict[str, Any] = {
+            "effort": effort_sub,
+            "vault": vault_sub,
+            "model": None,    # free-form text
+            "btw": None,
+            "history": None,
+        }
+        for name in COMMANDS:
+            slash_map[f"/{name}"] = sub_args.get(name)
+
+        return NestedCompleter.from_nested_dict(slash_map)
+
     def _build_input_reader(self) -> Callable[[], Optional[str]]:
         """Return a callable that reads one (possibly multi-line) input.
 
-        Tries prompt_toolkit first (history, multi-line, key bindings); falls
-        back to plain `input()` if it's not installed or stdin isn't a TTY.
+        Tries prompt_toolkit first (history, multi-line, key bindings,
+        slash-command autocompletion); falls back to plain `input()` if
+        prompt_toolkit isn't installed or stdin isn't a TTY.
+
+        Keyboard shortcuts (prompt_toolkit):
+          TAB / ↓       open / navigate completion menu
+          Enter         select completion or submit input
+          Esc           dismiss completion menu
+          Ctrl+D        exit REPL
+          Esc+Enter     insert newline (multi-line input)
         """
         try:
             from prompt_toolkit import PromptSession
             from prompt_toolkit.history import FileHistory
             from prompt_toolkit.key_binding import KeyBindings
+            from prompt_toolkit.styles import Style
         except ImportError:
             return self._basic_input
 
@@ -297,10 +341,28 @@ class Repl:
         def _exit(event: Any) -> None:
             event.app.exit(exception=EOFError())
 
+        @kb.add("escape", "enter")
+        def _newline(event: Any) -> None:
+            event.current_buffer.insert_text("\n")
+
+        completer = self._build_completer()
+
+        # Muted style so the completion menu doesn't overwhelm the prompt
+        style = Style.from_dict({
+            "completion-menu.completion": "bg:#1e1e2e fg:#cdd6f4",
+            "completion-menu.completion.current": "bg:#313244 fg:#cba6f7 bold",
+            "completion-menu.meta.completion": "bg:#1e1e2e fg:#6c7086",
+            "scrollbar.background": "bg:#313244",
+            "scrollbar.button": "bg:#585b70",
+        })
+
         session = PromptSession(
             history=FileHistory(str(history_path)),
             multiline=False,
             key_bindings=kb,
+            completer=completer,
+            complete_while_typing=True,   # show menu as user types /
+            style=style,
         )
 
         def _read() -> Optional[str]:
@@ -318,6 +380,14 @@ class Repl:
             return input("matrioska › ")
         except (EOFError, KeyboardInterrupt):
             raise
+
+    def _fire_hook(self, name: str, context: Dict[str, Any]) -> None:
+        try:
+            from matrioska.hooks import HookRunner
+            runner = HookRunner(project_dir=Path.cwd())
+            runner.run(name, context)
+        except Exception:
+            pass
 
     # ── Status helpers ─────────────────────────────────────────────────────
 

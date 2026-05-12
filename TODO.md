@@ -2,6 +2,13 @@
 
 ## Pipeline & Generation
 
+- [x] **Multi planning** — `agents/multi_planner.py`. MetaPlanner decomposes the task
+  into 2-4 self-contained sub-domains with a shared_interface contract. Each sub-domain
+  gets a scoped ArchitectAgent call (sequential, so later sub-planners see accumulated
+  shared_state writes). Results merged into one Architecture with deduplicated FileSpecs.
+  Enabled via `cfg.enable_multi_plan=True` / `MATRIOSKA_ENABLE_MULTI_PLAN=true`.
+  Falls back to single ArchitectAgent if meta-planner returns < 2 sub-problems.
+
 - [ ] **Phase 3 sandbox execution** — `execute_container()` exists but untested.
   Wire up the Docker sandbox with volume mounts and capture stdout/stderr/exit code
   as validation signals that feed back into the repair loop.
@@ -85,11 +92,12 @@ passo de ser um vault Obsidian nativo.
 *Executar `matrioska` sem subcomando abre um REPL interativo — prompt simples de
 conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.*
 
-- [ ] **REPL autocompletion & keyboard navigation** — Auto-complete `/` slash commands
-  in the REPL with history-aware suggestions. Support arrow keys, ENTER, and TAB for
-  navigation and selection in the completions menu. Integrate with prompt_toolkit's
-  `FuzzyCompleter` and `NestedCompleter`. Allow TAB to cycle through suggestions,
-  ENTER to select, arrow keys to browse, and Esc to dismiss.
+- [x] **REPL autocompletion & keyboard navigation** — `cli/repl.py::_build_completer()`.
+  `NestedCompleter` built from `COMMANDS` registry; `/vault` → `{list,search,doctor,graph}`,
+  `/effort` → `{low,medium,high}`, all other commands have bare completion. Added to
+  `PromptSession(completer=..., complete_while_typing=True)` with Catppuccin-style menu.
+  TAB/↓ opens menu, arrows navigate, Enter selects, Esc dismisses. Also fixed
+  `EventBus.emit` wildcard bug: `"*"` handlers were never fired (silent dashboard/recorder).
 
 - [ ] **Rewind / checkpoint** — no REPL, `Esc+Esc` ou `/rewind` volta ao último
   checkpoint salvo (desfaz geração da última rodada). StateGraph já tem checkpoints —
@@ -99,10 +107,12 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   `/meu-cmd` como slash command no REPL. Conteúdo do arquivo vira prompt injetado.
   Permite criar workflows reutilizáveis por projeto.
 
-- [ ] **Hook system** — `.matrioska/hooks/` com scripts shell executados em eventos:
-  `pre_generate` (antes de gerar um arquivo), `post_generate` (após geração),
-  `pre_repair` (antes de repair), `session_start`, `session_end`. Scripts recebem
-  JSON via stdin com contexto do evento.
+- [x] **Hook system** — `hooks.py::HookRunner`. Searches `.matrioska/hooks/` (project)
+  then `~/.matrioska/hooks/` (global). Scripts named `pre_generate`, `post_generate`,
+  `pre_repair`, `phase1_done`, `phase2_done`, `run_end`, `session_start`, `session_end`
+  (any extension; must be executable). Context passed as JSON via stdin. 10s timeout,
+  non-zero exit logged as warning. Wired into orchestrator `__init__` (auto-detects dirs)
+  and REPL `run()` / `finally` (session hooks). 14 new tests across 3 features.
 
 ## CLI & DX
 

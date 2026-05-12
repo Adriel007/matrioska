@@ -95,6 +95,12 @@ class Matrioska:
         self.procedural = ProceduralMemory(self.work_dir)
         self.procedural.ensure_project_memory()
 
+        # ── Hook system ──────────────────────────────────────────────────
+        from matrioska.hooks import make_hook_runner
+        self._hooks = make_hook_runner(self.work_dir)
+        if self._hooks.active:
+            self._hooks.subscribe(self.bus)
+
         # ── LLM ──────────────────────────────────────────────────────────
         if not self.cfg.dry_run:
             self.llm = LLMClient(self.cfg, bus=self.bus)

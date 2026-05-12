@@ -61,7 +61,10 @@ class EventBus:
     def emit(self, event: Event) -> None:
         with self._lock:
             self._metrics[event.name] = self._metrics.get(event.name, 0) + 1
-            handlers = list(self._handlers.get(event.name, []))
+            handlers = (
+                list(self._handlers.get(event.name, []))
+                + list(self._handlers.get("*", []))
+            )
         for h in handlers:
             try:
                 h(event)
