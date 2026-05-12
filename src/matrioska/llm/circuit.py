@@ -328,8 +328,9 @@ def is_small_model(model: str) -> bool:
 
 # ── MoE-style routing by file extension ──────────────────────────────────────
 
+import json as _json
 
-EXTENSION_MODEL_MAP: Dict[str, str] = {
+_DEFAULT_EXTENSION_MODEL_MAP: Dict[str, str] = {
     "py": "claude-sonnet-4",       # Best Python benchmark
     "ts": "claude-sonnet-4",       # Strong TypeScript support
     "tsx": "claude-sonnet-4",
@@ -344,11 +345,36 @@ EXTENSION_MODEL_MAP: Dict[str, str] = {
     "sql": "gpt-4o",               # Strong SQL generation
 }
 
+# Backwards-compatible alias (module-level constant)
+EXTENSION_MODEL_MAP: Dict[str, str] = _DEFAULT_EXTENSION_MODEL_MAP
 
-def route_model_for_extension(extension: str, default: str) -> str:
+
+def get_extension_model_map(cfg: "Any") -> Dict[str, str]:
+    """Return the effective extension→model map for the given Config.
+
+    If ``cfg.moe_extension_map`` is a non-empty JSON string it is parsed and
+    merged *on top of* the hardcoded defaults (per-key override semantics).
+    """
+    merged: Dict[str, str] = dict(_DEFAULT_EXTENSION_MODEL_MAP)
+    raw = getattr(cfg, "moe_extension_map", "")
+    if raw and isinstance(raw, str):
+        raw = raw.strip()
+    if raw:
+        try:
+            overrides = _json.loads(raw)
+            if isinstance(overrides, dict):
+                merged.update({str(k): str(v) for k, v in overrides.items()})
+        except (_json.JSONDecodeError, ValueError) as exc:
+            logger.warning("moe_extension_map JSON parse error: %s", exc)
+    return merged
+
+
+def route_model_for_extension(extension: str, default: str, cfg: "Any" = None) -> str:
     """MoE routing: map file extension → best-performing model.
 
-    If the extension is unknown, falls back to the default model.
+    If *cfg* is supplied, honours ``cfg.moe_extension_map`` overrides.
+    If the extension is unknown, falls back to *default*.
     """
     ext = extension.lower().lstrip(".")
-    return EXTENSION_MODEL_MAP.get(ext, default)
+    ext_map = get_extension_model_map(cfg) if cfg is not None else _DEFAULT_EXTENSION_MODEL_MAP
+    return ext_map.get(ext, default)

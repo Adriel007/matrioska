@@ -60,19 +60,73 @@ class SemanticMemory:
         self._init_chroma()
         self._load_graph()
 
+    # Default ONNX model cache directory used by chromadb's default embedding fn
+    _CHROMA_CACHE_DIR = Path.home() / ".cache" / "chroma" / "onnx_models"
+
+    @staticmethod
+    def _chroma_model_cached() -> bool:
+        """Return True if the default ONNX embedding model is already cached."""
+        cache = Path.home() / ".cache" / "chroma" / "onnx_models"
+        if not cache.exists():
+            return False
+        # The model directory contains at least one .onnx file when fully downloaded
+        return any(cache.rglob("*.onnx"))
+
+    @staticmethod
+    def _notify_download() -> None:
+        """Print a download-progress message before the ONNX model is fetched."""
+        try:
+            from rich.console import Console
+            from rich.progress import Progress, SpinnerColumn, TextColumn
+            import threading
+
+            console = Console(stderr=True)
+            stop_event = threading.Event()
+
+            def _spinner() -> None:
+                with Progress(
+                    SpinnerColumn(),
+                    TextColumn("[bold cyan]Downloading embedding model (~79 MB)…[/]"),
+                    console=console,
+                    transient=True,
+                ) as prog:
+                    prog.add_task("download", total=None)
+                    stop_event.wait()
+
+            t = threading.Thread(target=_spinner, daemon=True)
+            t.start()
+            # Return the stop_event so the caller can signal completion
+            return stop_event  # type: ignore[return-value]
+        except ImportError:
+            print("Downloading embedding model (~79 MB)...", flush=True)
+            return None  # type: ignore[return-value]
+
     def _init_chroma(self) -> None:
         try:
             import chromadb
             from chromadb.utils import embedding_functions
-            ef = embedding_functions.DefaultEmbeddingFunction()
-            client = chromadb.PersistentClient(
-                path=str(self.root / ".chromadb")
-            )
-            self._collection = client.get_or_create_collection(
-                name="semantic_memory",
-                embedding_function=ef,
-            )
-            self._chroma_ok = True
+
+            # Show a progress indicator only if the model hasn't been cached yet
+            _stop_event: Any = None
+            if not self._chroma_model_cached():
+                _stop_event = self._notify_download()
+
+            try:
+                ef = embedding_functions.DefaultEmbeddingFunction()
+                client = chromadb.PersistentClient(
+                    path=str(self.root / ".chromadb")
+                )
+                self._collection = client.get_or_create_collection(
+                    name="semantic_memory",
+                    embedding_function=ef,
+                )
+                self._chroma_ok = True
+            finally:
+                if _stop_event is not None:
+                    try:
+                        _stop_event.set()
+                    except Exception:
+                        pass
         except ImportError:
             logger.debug("ChromaDB not available; semantic memory uses disk-only mode")
         except Exception as e:
