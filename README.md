@@ -2,31 +2,33 @@
 
 **Contract-first, state-graph multi-agent LLM orchestrator for code generation.**
 
-Matrioska decomposes complex coding tasks into a DAG of files that coordinate through a typed `shared_state` whiteboard. Three pipeline phases — Architecture (with Tree-of-Thoughts voting), Generation (DAG-layered parallel with AlphaCodium test enrichment + Reflexion + ACI Repair), and Verification (contract validation + sandbox execution) — produce complete, validated projects.
+Matrioska decomposes complex coding tasks into a DAG of files that coordinate through a typed `shared_state` whiteboard. Three pipeline phases — Architecture (with Tree-of-Thoughts + Multi-Planning), Generation (DAG-layered parallel with AlphaCodium, Reflexion, and ACI Repair), and Verification (contract validation + sandbox) — produce complete, validated projects.
 
 ## Architecture
 
 ```
-Task → [Phase 1: N× Architect → Judge → Best Plan]
+Task → [Phase 1: MetaPlanner (optional) → N× Architect → Judge → Best Plan]
     → [Phase 2: DAG layers → TestDesign ∥ Generate ∥ Validate ∥ ACIRepair ∥ Reflect]
     → [Phase 3: Contract check → Cross-file → Sandbox → Replan?]
-    → Output + Episodic Note
+    → Output + Episodic Note + Vault Compilation
 ```
 
 ### Modular Monolith with Event-Driven Core
 
 ```
 src/matrioska/
-├── core/         State graph, typed contracts, events, config
+├── core/         State graph, typed contracts, events, config, text utils, types
 ├── llm/          Multi-provider client, circuit breaker, MoE router, slot pool
 ├── memory/       Episodic → Semantic → Procedural + Obsidian Vault (global)
-├── agents/       Architect, Generator, TestDesigner, Validator, Judge, Repairer, Reflector
+├── agents/       Architect, MultiPlanner, Generator, TestDesigner, Validator,
+│                 Judge, Repairer, Reflector
 ├── pipeline/     3-phase orchestration with checkpointing, preflight, executor
+├── hooks.py      Hook system: .matrioska/hooks/ scripts on pipeline events
 ├── tools/        Sandbox executor, tool dispatcher
-├── eval/         Metrics, golden regression suite (30 tasks)
-├── cli/          Rich CLI + dashboard + init wizard
-│                 (run, resume, show, clean, serve, eval, init, btw, vault)
-└── api.py        Python API + MCP server
+├── eval/         Metrics, golden regression suite (30 tasks), bench.py
+├── cli/          Rich dashboard + REPL + init wizard
+│                 (run, resume, show, clean, serve, eval, compile, init, btw, vault)
+└── api.py        Python API (run + arun streaming) + MCP server
 ```
 
 ## Key Design Decisions
@@ -36,12 +38,13 @@ src/matrioska/
 | **Coordination** | Typed shared_state contracts | Prevents chain hallucination (MetaGPT insight) |
 | **DAG** | Kahn topological layers | Enables intra-layer parallelism |
 | **Architecture** | Tree-of-Thoughts (N candidates → Judge voting) | 70pp improvement on reasoning tasks (Yao et al.) |
+| **Multi-Planning** | MetaPlanner → N scoped sub-domain architects | Better decomposition for complex multi-component tasks |
 | **Test Design** | Contract-first TestDesigner (blind to code) | Eliminates "test-the-bug-you-wrote" (AgentCoder, arXiv:2312.13010) |
 | **Generation** | AlphaCodium flow: tests → generate → smoke-check | GPT-4: 19%→44% pass@5 on CodeContests (arXiv:2401.08500) |
 | **Validation** | Process supervision (syntax + contracts per-file) | Outperforms outcome-only (Lightman et al.) |
 | **Repair** | ACI targeted patch (hunks) + full-file fallback | Preserves cross-file invariants (SWE-agent, arXiv:2405.15793) |
 | **Reflection** | Verbal reflection → episodic memory | 91% HumanEval (Shinn et al.) |
-| **Memory** | Episodic → Semantic → Procedural | Multi-timescale retrieval |
+| **Memory** | Episodic → Semantic → Procedural + Global Vault | Multi-timescale retrieval + Karpathy LLM Wiki Pattern |
 | **Models** | Role-specific (Architect≠Generator≠Validator) | Right capability/cost per role |
 | **State** | Checkpointed state graph | Resume, branching, time-travel debug |
 | **Execution** | Docker sandbox (optional) | Ground truth feedback (AutoDev-inspired) |
@@ -69,10 +72,17 @@ matrioska run --task "Create a FastAPI CRUD API for books with SQLite"
 # Rapid iteration: skip ToT, Reflexion, TestDesign, ACI, Phase 3
 matrioska run --task "..." --quick
 
+# Multi-planning: meta-decompose task into N sub-domains before coding
+matrioska run --task "Build a full-stack blog with auth, API, and React UI" \
+    --enable-multi-plan
+
 # Permission modes
 matrioska run --task "..." --mode plan         # plan only (return after Phase 1)
 matrioska run --task "..." --mode ask          # confirm each file before generation
 matrioska run --task "..." --interactive       # review and approve plan before Phase 2
+
+# Skip connectivity check (useful in CI)
+matrioska run --task "..." --skip-validation
 
 # One-shot LLM query without touching the pipeline or memory
 matrioska btw "what is RRF retrieval fusion?"
@@ -81,13 +91,17 @@ matrioska btw "what is RRF retrieval fusion?"
 matrioska resume
 matrioska show
 
-# Interactive REPL (no subcommand) — slash commands, ! shell, streaming
+# Interactive REPL (no subcommand) — slash commands, autocompletion, ! shell
 matrioska
 # matrioska › /help
-# matrioska › /effort high
-# matrioska › Create a CLI todo app with SQLite
-# matrioska › /vault search sqlite
-# matrioska › !ls
+# matrioska › /effort high            → 5 candidates, ToT + Reflexion + TestDesign
+# matrioska › /stream                 → token-by-token via EventBus
+# matrioska › Create a FastAPI CRUD API with SQLite
+# matrioska › /vault search "sqlite"  → inline vault query with Rich output
+# matrioska › /vault project myapp    → view project notes
+# matrioska › /rewind                 → restore last checkpoint
+# matrioska › !ls matrioska_work
+# matrioska › /usage                  → tokens / cost this session
 
 # Global knowledge vault (Obsidian-compatible)
 matrioska vault list
@@ -95,11 +109,12 @@ matrioska vault search "sqlite patterns" --scope global
 matrioska vault doctor
 matrioska vault graph -o vault-graph.md
 
-# DSPy-driven prompt compilation against the golden suite
-matrioska compile --target architect --category cli --max-tasks 5
-
-# Run golden evaluation suite
+# Evaluation and regression
 matrioska eval --category cli
+matrioska eval --category cli --save-baseline --baseline-file baselines.json
+
+# DSPy-driven prompt compilation
+matrioska compile --target architect --category cli --max-tasks 5
 ```
 
 ### Provider Examples
@@ -125,6 +140,12 @@ matrioska run --base-url https://openrouter.ai/api/v1 --api-key sk-or-... \
 matrioska run --provider openai --base-url http://localhost:11434/v1 \
     --api-key ollama --model llama3.1:8b \
     --task "Create a file renaming utility"
+
+# Multi-key rotation (same provider, round-robin)
+export MATRIOSKA_API_KEYS=gsk_key1,gsk_key2,gsk_key3
+
+# Extra endpoints (fallback to different providers)
+export MATRIOSKA_EXTRA_ENDPOINTS='[{"provider":"deepseek","base_url":"https://api.deepseek.com/v1","api_key":"ds_xxx","model":"deepseek-coder-v2"}]'
 ```
 
 ### Python API
@@ -134,20 +155,36 @@ from matrioska import Matrioska, Config, load_config
 
 cfg = load_config({"provider": "openai", "model": "gpt-4o-mini"})
 m = Matrioska(cfg)
-result = m.run("Create a CLI todo app with SQLite")
 
-print(result["status"])       # success | partial | failed
+# Blocking run
+result = m.run("Create a CLI todo app with SQLite")
+print(result["status"])       # success | partial | failed | aborted
 print(result["project_name"]) # snake_case_project_name
 for a in result["artifacts"]:
     print(f"  {a.name}.{a.extension} [{a.status}] {len(a.content)} chars")
+
+# Streaming: yield events as they happen
+for event in m.arun("Create a CLI todo app"):
+    print(event["event"], event["data"])
+    if event["event"] == "run_end":
+        result = event["data"]
+        break
 ```
 
 ## Pipeline Phases
 
-### Phase 1: Architecture (with Tree-of-Thoughts)
+### Phase 1: Architecture
+
+#### Standard (Tree-of-Thoughts)
 - N parallel Architect calls (default N=3, temperature=0.7 for diversity)
 - Judge evaluates each plan on completeness, minimality, consistency, feasibility
 - Best plan selected via voting; structured JSON output (`ARCHITECTURE_JSON_SCHEMA`)
+
+#### Multi-Planning (`enable_multi_plan=True`)
+1. **MetaPlanner**: one LLM call identifies 2-4 sub-domains + `shared_interface` keys
+2. **Scoped architects**: for each sub-domain, a full ArchitectAgent generates files aware of the shared interface and previously declared keys (sequential, not parallel)
+3. **Merge**: deduplicate by `name.ext`, renumber order, produce a unified Architecture
+4. Falls back to single architect if meta-planner returns < 2 sub-problems
 
 ### Phase 2: Generation (AlphaCodium + AgentCoder flow)
 
@@ -167,23 +204,16 @@ Each file in the DAG goes through:
 [Reflector]   → verbal reflection → episodic memory
 ```
 
-1. **TestDesigner** (AgentCoder, arXiv:2312.13010): generates 3-5 structural/interface tests from the file's contract — *without seeing any code*. Eliminates the bias of testing your own bugs.
-2. **AlphaCodium flow** (arXiv:2401.08500): tests injected into the Generator prompt as implementation targets. After syntax validation passes, tests run inline as a smoke check. Failures become concrete repair signal.
-3. **ACI Repairer** (SWE-agent, arXiv:2405.15793): dual-mode repair. When errors reference specific line numbers, asks the model for targeted JSON patch hunks (`start_line`, `end_line`, `new_content`) applied surgically bottom-up. Falls back to full-file repair when hunks fail to apply. Preserves cross-file invariants instead of rewriting from scratch.
-4. **Reflexion loop** (Shinn et al., 2023): Reflector reviews generated artifacts and feeds verbal insights forward into subsequent generations.
-5. Complex files spawn recursive nested Matrioska sub-agents.
+1. **TestDesigner** (AgentCoder, arXiv:2312.13010): generates 3-5 structural tests from the file's contract — *without seeing any code*.
+2. **AlphaCodium flow** (arXiv:2401.08500): tests injected into the Generator prompt as implementation targets. Failures become concrete repair signal.
+3. **ACI Repairer** (SWE-agent, arXiv:2405.15793): dual-mode repair. Line-specific errors get JSON patch hunks applied surgically bottom-up; falls back to full-file otherwise.
+4. **Reflexion loop** (Shinn et al., 2023): verbal reflection → episodic memory → 91% HumanEval.
 
 ### Phase 3: Verification & Integration
 - Contract validation: every file's `shared_state_writes` populated and typed
 - Cross-file consistency: every `shared_state_reads` has a declared writer
-- Optional Docker sandbox execution with captured stdout/stderr
+- Optional Docker sandbox execution with captured stdout/stderr/exit code
 - On failure: replan (returns to Phase 1 or 2 with error context)
-
-> **Note:** During Phase 2, contract violations are non-blocking (warnings only).
-> The authoritative contract check runs in Phase 3. This prevents generators
-> from stalling on missing `shared_state_updates` — keys declared in
-> `shared_state_writes` are auto-populated with placeholders so downstream
-> files can reference them.
 
 ## Core Concepts
 
@@ -192,19 +222,16 @@ Each file in the DAG goes through:
 ```python
 from matrioska.core.contracts import SharedStateSchema, FileContract, StateKeyType
 
-# Define what a key looks like
 routes_schema = SharedStateSchema(
     key="app_routes",
     type=StateKeyType.STR_LIST,
     description="API route paths",
     examples=[["/users", "/books", "/health"]],
 )
-
-# File declares its reads and writes
 contract = FileContract(
     file="main.py",
-    reads=[],            # This file is the entry point
-    writes=[routes_schema],  # It produces the routes list
+    reads=[],
+    writes=[routes_schema],
 )
 ```
 
@@ -219,12 +246,13 @@ contract = FileContract(
 | Judge | gpt-4o / claude-sonnet-4 | Analytical precision |
 | Repairer | (same as Generator) | Focused on debugging |
 
-MoE routing (`.py → claude-sonnet-4`, `.sql → gpt-4o`, etc.) applies to official OpenAI/Anthropic APIs. Third-party providers (Groq, NVIDIA, Ollama, OpenRouter) use the configured model directly — set `MATRIOSKA_<ROLE>_MODEL` explicitly.
-
-Override per role:
+MoE routing (`.py → claude-sonnet-4`, `.sql → gpt-4o`, etc.) applies to official OpenAI/Anthropic APIs. Third-party providers use the configured model directly. Override per role:
 ```bash
 matrioska run --architect-model claude-opus-4 --generator-model claude-sonnet-4 \
     --validator-model claude-haiku-4.5 --task "..."
+
+# Override MoE extension map (JSON)
+export MATRIOSKA_MOE_EXTENSION_MAP='{"py": "deepseek-coder-v2", "ts": "gpt-4o"}'
 ```
 
 ### Hierarchical Memory
@@ -232,15 +260,14 @@ matrioska run --architect-model claude-opus-4 --generator-model claude-sonnet-4 
 | Tier | Storage | Retrieval | Retention |
 |------|---------|-----------|-----------|
 | **Working** | shared_state + architecture + artifacts | Direct access | Current run |
-| **Episodic** | knowledge/runs/*.md (Obsidian-compatible) | Keyword + ChromaDB embeddings | All runs (per project) |
-| **Semantic** | knowledge/concepts/*.md + knowledge_graph.json | Embedding + k-hop graph traversal | Cross-project |
+| **Episodic** | knowledge/runs/*.md (Obsidian-compatible) | Keyword + ChromaDB | All runs (per project) |
+| **Semantic** | knowledge/concepts/*.md + knowledge_graph.json | Embedding + k-hop graph | Cross-project |
 | **Procedural** | knowledge/procedural_patterns.json + MATRIOSKA.md | DSPy-compiled few-shots | Permanent |
-| **Global Vault** | `~/.matrioska/vault/` (Markdown + YAML + wikilinks) | Dual-level: local / global / linked / all | Permanent, cross-project |
+| **Global Vault** | `~/.matrioska/vault/` (Markdown + YAML + wikilinks) | local / global / linked / all | Permanent, cross-project |
 
 ### Global Obsidian Vault (LLM Wiki Pattern)
 
-Inspired by Karpathy's [LLM Wiki](https://x.com/karpathy/) and [LightRAG (EMNLP 2025)](https://arxiv.org/abs/2409.14813),
-the vault "compiles" run knowledge into permanent Markdown instead of re-deriving with RAG every call.
+Inspired by [LightRAG (EMNLP 2025)](https://arxiv.org/abs/2409.14813) and Karpathy's LLM Wiki pattern, the vault "compiles" run knowledge into permanent Markdown.
 
 ```
 ~/.matrioska/vault/
@@ -249,29 +276,14 @@ the vault "compiles" run knowledge into permanent Markdown instead of re-derivin
 │   ├── patterns.md       # detected patterns (heuristic, dedup'd)
 │   ├── lessons.md        # repaired files, recurring fixes
 │   └── links.md          # [[wikilinks]] to related projects
-├── concepts/<tag>.md     # cross-project: e.g. sqlite, fastapi, argparse
+├── concepts/<tag>.md     # cross-project: sqlite, fastapi, argparse…
 ├── bugs/<slug>.md        # recurring bug → which projects hit it
 └── INDEX.md              # auto-maintained, Obsidian Graph View-ready
 ```
 
-After every run, `orchestrator._compile_into_vault()` runs an **idempotent**, **append-only** compiler:
-`derive_tags(task, artifacts)` → `extract_lessons_and_bugs()` → `compile_from_run()`. Marker-based section
-upserts (`<!-- section:ID -->`) ensure rerunning the same task never duplicates concept bullets.
+After every run, `_compile_into_vault()` runs idempotent append-only compilation. Retrieval scopes (`local` / `global` / `linked` / `all`) feed the Architect's context.
 
-Retrieval scopes (LightRAG dual-level):
-- `local`  — current project (`./matrioska_work/knowledge/`)
-- `global` — concepts + bugs across all projects
-- `linked` — BFS over `[[wikilinks]]` in `links.md`, `max_hops=2`
-- `all`    — everything
-
-Before Phase 1, the Architect receives a `RELEVANT VAULT KNOWLEDGE` block (scope=global, k=5) so
-patterns observed in past projects influence new decompositions.
-
-The same vault is exposed via the MCP server (`matrioska serve`): tools `vault_search`,
-`vault_get`, `vault_list`, `vault_doctor`, `vault_graph`, `vault_related` let Claude Code,
-Cursor, or Windsurf reuse Matrioska's accumulated knowledge directly. Writes are not
-exposed — the vault is only mutated by `_compile_into_vault` after a real run, so it
-remains a deterministic derivative of the run history.
+The same vault is exposed read-only via the MCP server (`matrioska serve`): tools `vault_search`, `vault_get`, `vault_list`, `vault_doctor`, `vault_graph`, `vault_related`.
 
 ## Interactive REPL
 
@@ -281,31 +293,60 @@ $ matrioska
 │  Matrioska — interactive shell                                │
 │  /help for commands · ! prefix for shell · Ctrl+D to exit     │
 ╰──────────────────────────────────────────────────────────────╯
-  provider=groq  model=llama-3.3-70b  effort=medium  vault on
+  provider=openai  model=gpt-4o-mini  effort=medium  vault on
 
-matrioska › /help
-matrioska › /effort high            # 5 candidates, ToT + Reflexion + TestDesign
-matrioska › /stream                 # token-by-token via EventBus
+matrioska › /effort high
 matrioska › Create a FastAPI CRUD API with SQLite
-matrioska › /vault search "sqlite"  # query the global vault inline
-matrioska › !ls matrioska_work       # shell prefix
-matrioska › /usage                  # tokens / cost this session
+matrioska › /vault search "sqlite"
+matrioska › /vault project my_api
+matrioska › /rewind
+matrioska › /usage
+matrioska › !pytest -x -q
 ```
 
-Slash commands: `/help`, `/config`, `/model`, `/usage`, `/clear`, `/plan`, `/effort`,
-`/memory`, `/init`, `/diff`, `/slots`, `/btw`, `/vault`, `/stream`, `/history`,
-`/quit`. Built on prompt_toolkit when installed (history at `~/.matrioska/history`,
-multi-line via Esc+Enter, ↑/↓ for previous commands); falls back to `input()` otherwise.
+**Slash commands**: `/help`, `/config`, `/model`, `/usage`, `/clear`, `/plan`, `/effort`, `/memory`, `/init`, `/diff`, `/slots`, `/btw`, `/vault`, `/stream`, `/rewind`, `/history`, `/quit`, plus any `.matrioska/commands/*.md` as custom commands.
+
+**Autocompletion** (requires `prompt_toolkit`): TAB/↓ opens a completion menu for all `/` commands; `/vault` and `/effort` show sub-command menus. Arrow keys navigate, Enter selects, Esc dismisses.
+
+**Keyboard shortcuts**: Ctrl+D exit, Ctrl+C cancel task, Esc+Enter newline.
+
+### Custom commands
+
+Create `.matrioska/commands/deploy.md` with the task prompt as content. It becomes `/deploy` in the REPL session.
+
+## Dashboard Controls (Live Run)
+
+The Rich dashboard supports interactive control while the pipeline runs:
+
+| Key | Action |
+|-----|--------|
+| `p` / Space | Pause / Resume |
+| `q` (first press) | Show abort confirmation |
+| `q` (second press within 3 s) | Abort pipeline |
+| `m` *(paused)* | Edit model name inline |
+| `e` *(paused)* | Cycle effort: low → medium → high |
+| `r` *(paused)* | Cycle max\_repairs: 1 → 2 → 3 → 5 |
+| `s` *(paused)* | Toggle stream\_tokens |
+
+Config changes during pause take effect for the next phase.
+
+## Hook System
+
+Scripts in `.matrioska/hooks/` (project) or `~/.matrioska/hooks/` (global) are executed on pipeline events. Any executable file (`*.sh`, `*.py`, etc.) receives the event context as JSON via stdin.
+
+```bash
+# .matrioska/hooks/post_generate.sh
+#!/usr/bin/env bash
+EVENT=$(cat)
+FILE=$(echo "$EVENT" | jq -r '.file')
+echo "$(date): generated $FILE" >> generation_log.txt
+```
+
+Supported hooks: `pre_generate`, `post_generate`, `pre_repair`, `phase1_done`, `phase2_done`, `run_end`, `session_start`, `session_end`. Timeout: 10 s.
 
 ## DSPy Prompt Compilation
 
-`matrioska compile --target architect --category cli --max-tasks 10` runs the
-[DSPy](https://arxiv.org/abs/2310.03714) compilation loop against the golden suite:
-splits tasks into train/val, runs a baseline, then `BootstrapFewShot` with
-`golden_metric` (binary `evaluate_result.pass`) as the objective. Compiled few-shot
-demos persisted at `~/.matrioska/dspy_compiled/{target}_demos.json`. When `dspy-ai`
-isn't installed, returns the baseline with `skipped_reason='dspy_not_installed'`
-so the same harness works either way.
+`matrioska compile --target architect --category cli --max-tasks 10` runs the [DSPy](https://arxiv.org/abs/2310.03714) compilation loop against the golden suite: splits tasks into train/val, runs a baseline, then `BootstrapFewShot` with `golden_metric` as the objective. Compiled few-shot demos persisted at `~/.matrioska/dspy_compiled/{target}_demos.json`.
 
 ## Evaluation
 
@@ -329,6 +370,22 @@ so the same harness works either way.
 | `execution_success_rate` | 0% | ≥70% |
 | `repair_effectiveness` | ~40% | ≥75% |
 
+Save and compare regression baselines:
+```bash
+matrioska eval --save-baseline --baseline-file baselines.json
+# next run: compare against saved
+matrioska eval --baseline-file baselines.json
+```
+
+### Benchmark Parallelization
+
+```python
+from matrioska.eval.bench import run_benchmark
+results = run_benchmark(tasks, orchestrators=["matrioska", "agentless"], max_workers=3)
+```
+
+Runs tasks independently via `ProcessPoolExecutor` — reduces 40-task benchmark from ~40 min to ~10 min at `max_workers=3`.
+
 ## Configuration Reference
 
 All options: CLI flags, env vars (`MATRIOSKA_<UPPER>`), or `.env` file.
@@ -348,13 +405,34 @@ All options: CLI flags, env vars (`MATRIOSKA_<UPPER>`), or `.env` file.
 | `--retrieve-k` | `MATRIOSKA_RETRIEVE_K` | `3` | Past runs to retrieve as context |
 | _(env only)_ | `MATRIOSKA_ENABLE_TEST_DESIGN` | `true` | AlphaCodium+AgentCoder test enrichment |
 | _(env only)_ | `MATRIOSKA_USE_ACI_REPAIR` | `true` | SWE-agent ACI targeted patch repair |
+| _(env only)_ | `MATRIOSKA_ENABLE_MULTI_PLAN` | `false` | Hierarchical meta-decomposition |
+| _(env only)_ | `MATRIOSKA_MOE_EXTENSION_MAP` | `""` | JSON override for extension→model routing |
 | `--quick` | `MATRIOSKA_QUICK` | `false` | Skip ToT, Reflexion, TestDesign, ACI, Phase 3 |
 | `--mode` | `MATRIOSKA_PERMISSION_MODE` | `auto` | `auto` \| `plan` \| `ask` |
 | `--no-vault` | `MATRIOSKA_ENABLE_VAULT` | `true` | Disable global Obsidian vault writes/reads |
 | `--vault-dir` | `MATRIOSKA_VAULT_DIR` | `~/.matrioska/vault` | Override vault location |
-| _(env only)_ | `MATRIOSKA_STREAM_TOKENS` | `false` | SSE token streaming (or `/stream` in REPL) |
+| `--skip-validation` | `MATRIOSKA_SKIP_VALIDATION` | `false` | Skip startup connectivity check |
+| _(env only)_ | `MATRIOSKA_STREAM_TOKENS` | `true` | SSE token streaming (or `/stream` in REPL) |
+| _(env only)_ | `MATRIOSKA_SERVE_PORT` | `9020` | MCP server port |
+| _(env only)_ | `MATRIOSKA_COST_PER_PROMPT_TOKEN` | `""` | Override prompt pricing ($/token) |
+| _(env only)_ | `MATRIOSKA_COST_PER_COMPLETION_TOKEN` | `""` | Override completion pricing ($/token) |
 
-See `.env.example` for the full reference.
+### Provider Pricing (built-in)
+
+Matrioska tracks estimated cost per run using a built-in pricing table (18 models across OpenAI, Anthropic, Groq, DeepSeek, Mistral, Together, NVIDIA). Override via env vars or add custom pricing via `MATRIOSKA_COST_PER_PROMPT_TOKEN`.
+
+## Troubleshooting
+
+| Symptom | Cause | Fix |
+|---------|-------|-----|
+| `400 Bad Request` on startup | Model deprecated / renamed, or account restricted | Check MATRIOSKA\_MODEL; if `organization_restricted` error: contact provider support |
+| `401 Unauthorized` | Invalid API key | Check `MATRIOSKA_API_KEY` in `.env` |
+| `404 Not Found` | Wrong model name | Check `MATRIOSKA_MODEL`; run `matrioska init` to pick from known models |
+| All slots on cooldown | Hit rate limits on all keys | Add more keys via `MATRIOSKA_API_KEYS=key1,key2,...` |
+| ChromaDB ImportError | Optional dep | `pip install chromadb`; first run downloads ~79 MB (progress bar shown) |
+| `mcp` not found | Optional dep | `pip install mcp` or omit `serve` subcommand |
+| Dashboard not rendering | Non-TTY / CI | Add `--no-dashboard` flag |
+| Port in use | MCP server | `--port <other>` or set `MATRIOSKA_SERVE_PORT` |
 
 ## Theoretical Foundations
 
@@ -370,19 +448,8 @@ See `.env.example` for the full reference.
 - **SWE-agent** (Yang et al., NeurIPS 2024, arXiv:2405.15793): Agent-Computer Interface with targeted edits
 - **Agentless** (Xia et al., 2024, arXiv:2407.01489): Deterministic localize→repair→validate as safety net
 - **AutoCodeRover** (Zhang et al., ISSTA 2024, arXiv:2404.05427): AST-level context for cross-file repairs
+- **LightRAG** (Edge et al., EMNLP 2025, arXiv:2409.14813): Dual-level graph-enhanced RAG
 - **LATS** (Zhou et al., ICML 2024, arXiv:2310.04406): MCTS with value function over agent trajectories
-
-## Troubleshooting
-
-| Symptom | Cause | Fix |
-|---------|-------|-----|
-| `400 Bad Request` on startup connectivity check | Model deprecated / renamed on provider | Matrioska warns and proceeds — update `MATRIOSKA_MODEL` if generation also fails |
-| `401 Unauthorized` | Invalid API key | Check `MATRIOSKA_API_KEY` in `.env` |
-| `404 Not Found` | Wrong model name for this provider | Check `MATRIOSKA_MODEL`; run `matrioska init` to pick from known models |
-| All slots on cooldown | Hit rate limits on all keys | Add more API keys via `MATRIOSKA_API_KEYS=key1,key2,...` |
-| ChromaDB ImportError | Optional dep not installed | `pip install chromadb` or disable embeddings (keyword-only fallback activates automatically) |
-| `mcp` not found | Optional dep | `pip install mcp` or omit `serve` subcommand |
-| Dashboard flicker / CI failure | Rich not compatible with non-TTY | Add `--no-dashboard` flag |
 
 ## License
 

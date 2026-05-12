@@ -52,8 +52,8 @@ def vault(tmp_path: Path):
 
 def _dispatch_vault(repl: Repl, subargs: str, vault_mock) -> List[str]:
     """Patch GlobalVault constructor and dispatch /vault <subargs>."""
-    with patch("matrioska.cli.repl.GlobalVault", return_value=vault_mock), \
-         patch("matrioska.cli.repl.default_vault_dir", return_value=Path("/tmp/vault")):
+    with patch("matrioska.memory.vault.GlobalVault", return_value=vault_mock), \
+         patch("matrioska.memory.vault.default_vault_dir", return_value=Path("/tmp/vault")):
         repl._printed.clear()
         repl._dispatch(f"/vault {subargs}".strip())
     return list(repl._printed)

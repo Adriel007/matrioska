@@ -115,7 +115,8 @@ def build_parser() -> argparse.ArgumentParser:
         "serve", help="Start MCP server for Claude Code integration"
     )
     _common(serve_p)
-    serve_p.add_argument("--port", type=int, default=9020)
+    serve_p.add_argument("--port", type=int, default=None,
+                         help="Port for MCP server (default: cfg.serve_port=9020, env: MATRIOSKA_SERVE_PORT)")
 
     # eval
     eval_p = sub.add_parser("eval", help="Run golden regression suite")
@@ -337,10 +338,13 @@ def _cmd_serve(ns: argparse.Namespace) -> int:
     """Start the Matrioska MCP server."""
     try:
         from matrioska.api import create_mcp_server
+        from matrioska.core.config import load_config
         import asyncio
 
-        print(f"Matrioska MCP server starting on port {ns.port}...")
-        asyncio.run(create_mcp_server(port=ns.port))
+        cfg = load_config(_ns_to_overrides(ns))
+        port = ns.port if ns.port is not None else cfg.serve_port
+        print(f"Matrioska MCP server starting on port {port}...")
+        asyncio.run(create_mcp_server(port=port))
     except ImportError:
         print("MCP not available. Install with: pip install mcp", file=sys.stderr)
         return 1

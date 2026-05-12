@@ -69,3 +69,25 @@ def sanitize_output(text: str) -> str:
 def strip_fences(text: str) -> str:
     """Backwards-compatible alias for sanitize_output."""
     return sanitize_output(text)
+
+
+def parse_json_safe(text: str) -> dict:
+    """Parse JSON from LLM output with json_repair fallback.
+
+    Centralises the try-JSON / try-json_repair / fail pattern that was
+    duplicated across architect, generator, repairer, and validator agents.
+    Returns the parsed dict, or raises ValueError with a descriptive message.
+    """
+    import json
+    text = text.strip()
+    if not text:
+        raise ValueError("Empty response from LLM")
+    try:
+        return json.loads(text)
+    except json.JSONDecodeError:
+        pass
+    try:
+        from json_repair import repair_json
+        return json.loads(repair_json(text))
+    except Exception as e:
+        raise ValueError(f"JSON unparseable even after repair: {e}") from e

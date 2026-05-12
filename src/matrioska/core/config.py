@@ -158,6 +158,9 @@ class Config:
     # skip_validation=True: skip provider connectivity check on startup.
     skip_validation: bool = False       # env: MATRIOSKA_SKIP_VALIDATION
 
+    # ── Server ────────────────────────────────────────────────────────────
+    serve_port: int = 9020               # env: MATRIOSKA_SERVE_PORT
+
     # ── Misc ──────────────────────────────────────────────────────────────
     thinking: bool = False              # env: MATRIOSKA_THINKING
     dry_run: bool = False               # env: MATRIOSKA_DRY_RUN
@@ -238,7 +241,7 @@ _BOOL_FLAGS = {
     "skip_validation",
 }
 _INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",
-               "architect_candidates", "sandbox_timeout"}
+               "architect_candidates", "sandbox_timeout", "serve_port"}
 _FLOAT_FIELDS = {"temperature", "architect_temperature"}
 _PATH_FIELDS = {"work_dir"}
 
