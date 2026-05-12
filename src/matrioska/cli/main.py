@@ -88,6 +88,10 @@ def build_parser() -> argparse.ArgumentParser:
     run_p.add_argument("--interactive", action="store_true", default=None)
     run_p.add_argument("--no-dashboard", dest="no_dashboard", action="store_true",
                        help="Disable live dashboard, print plain logs instead")
+    run_p.add_argument(
+        "--skip-validation", dest="skip_validation", action="store_true", default=None,
+        help="Skip provider connectivity/model validation check on startup",
+    )
 
     # resume
     res_p = sub.add_parser("resume", help="Resume from latest checkpoint")
@@ -118,6 +122,15 @@ def build_parser() -> argparse.ArgumentParser:
     _common(eval_p)
     eval_p.add_argument("--category")
     eval_p.add_argument("--task-id", dest="task_id")
+    eval_p.add_argument(
+        "--save-baseline", dest="save_baseline", action="store_true", default=False,
+        help="Save run metrics as the new baseline after evaluation",
+    )
+    eval_p.add_argument(
+        "--baseline-file", dest="baseline_file", type=Path,
+        default=None,
+        help="Path to a JSON baseline file (load for comparison; save here with --save-baseline)",
+    )
 
     # compile (DSPy)
     comp_p = sub.add_parser("compile", help="DSPy-driven prompt compilation against golden suite")
@@ -223,6 +236,7 @@ def _build_cli_overrides(ns: argparse.Namespace) -> Dict[str, Any]:
         "permission_mode",
         "enable_vault",
         "vault_dir",
+        "skip_validation",
     ):
         val = getattr(ns, key, None)
         if val is not None:
@@ -338,6 +352,7 @@ def _cmd_serve(ns: argparse.Namespace) -> int:
 def _cmd_eval(ns: argparse.Namespace) -> int:
     """Run golden regression suite."""
     from matrioska.eval.golden_suite import get_golden_tasks, evaluate_result
+    from matrioska.eval.metrics import MetricComparator, RunMetrics, save_baselines
     from matrioska.core.config import load_config, validate_config
     from matrioska.pipeline.orchestrator import Matrioska
 
@@ -347,6 +362,8 @@ def _cmd_eval(ns: argparse.Namespace) -> int:
 
     category = getattr(ns, "category", None)
     task_id = getattr(ns, "task_id", None)
+    baseline_file: Optional[Path] = getattr(ns, "baseline_file", None)
+    save_baseline: bool = getattr(ns, "save_baseline", False)
 
     if task_id:
         tasks = [t for t in get_golden_tasks() if t.id == task_id]
@@ -359,7 +376,10 @@ def _cmd_eval(ns: argparse.Namespace) -> int:
 
     print(f"Running {len(tasks)} golden task(s)...\n")
 
+    comparator = MetricComparator(baseline_file=baseline_file)
+
     passed = 0
+    aggregated_metrics: Dict[str, Any] = {}
     for task in tasks:
         print(f"  [{task.id}] {task.task[:70]}...", end=" ", flush=True)
         try:
@@ -377,10 +397,38 @@ def _cmd_eval(ns: argparse.Namespace) -> int:
                             f"    - {check_name}: expected={check.get('expected', '?')} "
                             f"actual={check.get('actual', '?')}"
                         )
+            # Accumulate metrics from orchestrator token/metric snapshots
+            tok = result.get("tokens", {}) or {}
+            aggregated_metrics.setdefault("total_tokens", 0)
+            aggregated_metrics["total_tokens"] += tok.get("total_tokens", 0)
+            aggregated_metrics.setdefault("total_cost_usd", 0.0)
+            aggregated_metrics["total_cost_usd"] += tok.get("estimated_cost_usd", 0.0)
         except Exception as e:
             print(f"ERROR: {e}")
 
     print(f"\n{passed}/{len(tasks)} passed")
+
+    # Build a RunMetrics snapshot from what we know
+    run_metrics_data: Dict[str, Any] = {
+        "contract_fulfillment_rate": passed / max(len(tasks), 1),
+        "first_pass_rate": passed / max(len(tasks), 1),
+        "execution_success_rate": passed / max(len(tasks), 1),
+        "repair_effectiveness": passed / max(len(tasks), 1),
+        "token_efficiency": 0.0,
+        "total_files": 0,
+        "total_tokens": aggregated_metrics.get("total_tokens", 0),
+        "total_cost_usd": aggregated_metrics.get("total_cost_usd", 0.0),
+        "duration_s": 0.0,
+    }
+    run_metrics = RunMetrics(**{k: v for k, v in run_metrics_data.items()
+                                if k in RunMetrics.__dataclass_fields__})
+    comparison = comparator.compare(run_metrics)
+    print(f"\n{comparator.summary_line(run_metrics)}")
+
+    if save_baseline:
+        bfile = baseline_file or Path("baselines.json")
+        save_baselines(run_metrics_data, bfile)
+        print(f"Baseline saved to {bfile}")
 
     return 0 if passed == len(tasks) else 1
 

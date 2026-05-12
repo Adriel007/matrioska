@@ -11,8 +11,10 @@ Measures what matters:
 
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass, field
-from typing import Any, Dict, List
+from pathlib import Path
+from typing import Any, Dict, List, Optional
 
 
 @dataclass
@@ -44,10 +46,35 @@ class RunMetrics:
         }
 
 
+def load_baselines(path: Path) -> Dict[str, Any]:
+    """Load baseline metrics from a JSON file.
+
+    Returns an empty dict if the file does not exist or cannot be parsed,
+    so callers can safely fall back to hardcoded defaults.
+    """
+    p = Path(path)
+    if not p.exists():
+        return {}
+    try:
+        data = json.loads(p.read_text(encoding="utf-8"))
+        if isinstance(data, dict):
+            return data
+    except (json.JSONDecodeError, OSError):
+        pass
+    return {}
+
+
+def save_baselines(metrics: Dict[str, Any], path: Path) -> None:
+    """Persist baseline metrics to a JSON file, creating parent dirs as needed."""
+    p = Path(path)
+    p.parent.mkdir(parents=True, exist_ok=True)
+    p.write_text(json.dumps(metrics, indent=2, ensure_ascii=False), encoding="utf-8")
+
+
 class MetricComparator:
     """Compares current metrics against baseline and target values.
 
-    The baseline is the MVP (estimated from the plan):
+    The hardcoded baseline is the MVP (estimated from the plan):
         contract_fulfillment_rate: ~60%
         first_pass_rate: ~50%
         execution_success_rate: 0%
@@ -58,32 +85,52 @@ class MetricComparator:
         first_pass_rate: ≥80%
         execution_success_rate: ≥70%
         repair_effectiveness: ≥75%
+
+    If *baseline_file* is provided and exists, it is loaded and used as the
+    baseline in place of the hardcoded values.
     """
 
-    BASELINE = {
+    _DEFAULT_BASELINE: Dict[str, float] = {
         "contract_fulfillment_rate": 0.60,
         "first_pass_rate": 0.50,
         "execution_success_rate": 0.0,
         "repair_effectiveness": 0.40,
     }
 
-    TARGET = {
+    # Keep the old class-level name for backwards compatibility
+    BASELINE = _DEFAULT_BASELINE
+
+    TARGET: Dict[str, float] = {
         "contract_fulfillment_rate": 0.95,
         "first_pass_rate": 0.80,
         "execution_success_rate": 0.70,
         "repair_effectiveness": 0.75,
     }
 
-    @classmethod
-    def compare(cls, metrics: RunMetrics) -> Dict[str, Any]:
+    def __init__(self, baseline_file: Optional[Path] = None) -> None:
+        if baseline_file is not None:
+            loaded = load_baselines(baseline_file)
+            # Use loaded data if it has at least one recognised key; otherwise
+            # fall back to hardcoded defaults so we never compare against nothing.
+            if any(k in loaded for k in self._DEFAULT_BASELINE):
+                self._baseline: Dict[str, float] = {
+                    k: float(loaded.get(k, self._DEFAULT_BASELINE[k]))
+                    for k in self._DEFAULT_BASELINE
+                }
+            else:
+                self._baseline = dict(self._DEFAULT_BASELINE)
+        else:
+            self._baseline = dict(self._DEFAULT_BASELINE)
+
+    def compare(self, metrics: RunMetrics) -> Dict[str, Any]:
         """Compare run metrics against baseline and target."""
         d = metrics.to_dict()
         result = {"metrics": d, "comparison": {}}
 
-        for key in cls.BASELINE:
+        for key in self._baseline:
             val = d.get(key, 0)
-            baseline = cls.BASELINE[key]
-            target = cls.TARGET[key]
+            baseline = self._baseline[key]
+            target = self.TARGET[key]
             result["comparison"][key] = {
                 "value": val,
                 "baseline": baseline,
@@ -95,12 +142,11 @@ class MetricComparator:
 
         return result
 
-    @classmethod
-    def summary_line(cls, metrics: RunMetrics) -> str:
+    def summary_line(self, metrics: RunMetrics) -> str:
         """Single-line summary for CI output."""
-        comp = cls.compare(metrics)["comparison"]
+        comp = self.compare(metrics)["comparison"]
         parts = []
-        for key in cls.BASELINE:
+        for key in self._baseline:
             meets = "PASS" if comp[key]["meets_target"] else "FAIL"
             parts.append(f"{key}={comp[key]['value']:.2f}({meets})")
         return " | ".join(parts)

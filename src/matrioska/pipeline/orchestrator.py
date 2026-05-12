@@ -145,8 +145,12 @@ class Matrioska:
             model=self.cfg.model,
         )
 
-        # ── Connectivity check ──────────────────────────────────────────
-        if not self.cfg.dry_run and self.cfg.provider in ("openai", "anthropic"):
+        # ── Connectivity / model validation check ──────────────────────
+        if (
+            not self.cfg.dry_run
+            and not getattr(self.cfg, "skip_validation", False)
+            and self.cfg.provider in ("openai", "anthropic")
+        ):
             self._check_connectivity()
 
         # ── Pre-flight: read MATRIOSKA.md + scan existing code ─────────
