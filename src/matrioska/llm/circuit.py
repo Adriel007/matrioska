@@ -328,7 +328,16 @@ def is_small_model(model: str) -> bool:
 
 # ── MoE-style routing by file extension ──────────────────────────────────────
 
-
+# TODO (tracked in TODO.md): make this table configurable via
+#   MATRIOSKA_EXTENSION_MODEL_MAP (JSON env var) so users can override
+#   per-extension routing without changing source.  Example:
+#   MATRIOSKA_EXTENSION_MODEL_MAP='{"py": "deepseek-v3", "ts": "gpt-4o"}'
+#
+# NOTE: model names here are provider-specific magic strings.
+#   They are NOT validated at startup — a typo will surface only at
+#   first LLM call.  The `isinstance` checks in LLMClient dispatch
+#   (provider == "hf", "ollama", "anthropic") are intentional string
+#   comparisons, not isinstance hacks; they match Config.provider values.
 EXTENSION_MODEL_MAP: Dict[str, str] = {
     "py": "claude-sonnet-4",       # Best Python benchmark
     "ts": "claude-sonnet-4",       # Strong TypeScript support

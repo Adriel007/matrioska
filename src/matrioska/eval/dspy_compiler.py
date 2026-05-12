@@ -201,8 +201,8 @@ def compile_target(
     out_dir.mkdir(parents=True, exist_ok=True)
 
     try:
-        import dspy  # type: ignore  # noqa: F401
-        from dspy.teleprompt import BootstrapFewShot  # type: ignore
+        import dspy  # type: ignore[import-untyped]  # optional dep; no stubs
+        from dspy.teleprompt import BootstrapFewShot  # type: ignore[import-untyped]  # optional dep; no stubs
     except ImportError:
         logger.info(
             "DSPy not installed — emitting baseline-only summary. "
@@ -244,20 +244,20 @@ def _run_dspy_bootstrap(
     t0: float,
 ) -> CompileSummary:
     """DSPy-backed branch (only reached when dspy is importable)."""
-    import dspy  # type: ignore
-    from dspy.teleprompt import BootstrapFewShot  # type: ignore
+    import dspy  # type: ignore[import-untyped]  # optional dep; no stubs
+    from dspy.teleprompt import BootstrapFewShot  # type: ignore[import-untyped]  # optional dep; no stubs
 
-    class _Signature(dspy.Signature):  # type: ignore[misc]
+    class _Signature(dspy.Signature):  # type: ignore[misc]  # dspy metaclass not typed
         """Decompose a task into a Matrioska architecture."""
         task: str = dspy.InputField()
         plan: str = dspy.OutputField(desc="JSON plan with files and contracts")
 
-    class _Module(dspy.Module):  # type: ignore[misc]
+    class _Module(dspy.Module):  # type: ignore[misc]  # dspy metaclass not typed
         def __init__(self) -> None:
             super().__init__()
             self.architect = dspy.ChainOfThought(_Signature)
 
-        def forward(self, task: str) -> Any:  # type: ignore[override]
+        def forward(self, task: str) -> Any:  # type: ignore[override]  # dspy base sig is Any
             return self.architect(task=task)
 
     examples = [dspy.Example(task=t.task, plan="").with_inputs("task") for t in train]

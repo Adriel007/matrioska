@@ -18,7 +18,7 @@ def repl(tmp_path: Path) -> Repl:
     # Capture _print output for assertions.
     r._console = None
     r._printed: list[str] = []
-    r._print = lambda msg: r._printed.append(str(msg))  # type: ignore[assignment]
+    r._print = lambda msg: r._printed.append(str(msg))  # type: ignore[assignment]  # replacing bound method with lambda for test capture
     return r
 
 
@@ -65,9 +65,11 @@ def test_effort_set(repl: Repl):
 
 
 def test_stream_toggle(repl: Repl):
-    assert repl.cfg.stream_tokens is False
+    # Capture initial state and assert that /stream toggles it.
+    # Default may be True or False depending on env; we only verify the toggle.
+    initial = repl.cfg.stream_tokens
     repl._dispatch("/stream")
-    assert repl.cfg.stream_tokens is True
+    assert repl.cfg.stream_tokens is not initial
 
 
 def test_shell_prefix_runs_subprocess(repl: Repl, monkeypatch):

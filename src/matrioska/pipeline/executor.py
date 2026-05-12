@@ -219,7 +219,7 @@ def execute_artifact(
 
 def _get_stdlib() -> Set[str]:
     if hasattr(sys, "stdlib_module_names"):
-        return sys.stdlib_module_names | _EXTRA_STDLIB  # type: ignore[attr-defined]
+        return sys.stdlib_module_names | _EXTRA_STDLIB  # type: ignore[attr-defined]  # stdlib_module_names added in Python 3.10
     return _EXTRA_STDLIB
 
 
