@@ -11,14 +11,145 @@ from __future__ import annotations
 
 import json
 import logging
-from typing import Any, Dict, List, Optional
+import queue
+import threading
+import time
+from typing import Any, Dict, Iterator, List, Optional
 
 from matrioska.core.config import Config, load_config, validate_config
 from matrioska.pipeline.orchestrator import Matrioska, run
 
 logger = logging.getLogger("matrioska.api")
 
-__all__ = ["run", "Matrioska", "create_mcp_server", "run_with_config"]
+__all__ = ["run", "arun", "Matrioska", "create_mcp_server", "run_with_config", "MatrioskaStreaming"]
+
+_SENTINEL = object()  # Signals end-of-stream in the queue
+
+
+class MatrioskaStreaming:
+    """Thin wrapper around Matrioska that exposes a streaming generator API.
+
+    Usage::
+
+        client = MatrioskaStreaming(cfg)
+        for event in client.arun("Build a CLI todo app"):
+            print(event["event"], event["data"])
+        client.close()
+    """
+
+    def __init__(self, cfg: Optional[Config] = None):
+        self.cfg = cfg or load_config()
+        self._m: Optional[Matrioska] = None
+        self._thread: Optional[threading.Thread] = None
+        self._closed = False
+
+    def arun(self, task: str) -> Iterator[Dict[str, Any]]:
+        """Yield pipeline events as they happen.
+
+        Each yielded dict has: ``{"event": str, "data": dict, "timestamp": float}``
+        The final event is ``{"event": "run_end", ...}``.
+
+        Raises ``RuntimeError`` if called while a run is already in progress.
+        """
+        if self._thread is not None and self._thread.is_alive():
+            raise RuntimeError("arun() called while a previous run is still active; call close() first")
+
+        validate_config(self.cfg)
+        self._m = Matrioska(self.cfg)
+        ev_queue: "queue.Queue[Any]" = queue.Queue()
+
+        # ── Intercept ALL events by patching bus.emit ──────────────────
+        original_emit = self._m.bus.emit
+
+        def _intercepting_emit(event: Any) -> None:
+            original_emit(event)  # Normal dispatch first
+            ev_queue.put({
+                "event": event.name,
+                "data": dict(event.data),
+                "timestamp": time.time(),
+            })
+
+        self._m.bus.emit = _intercepting_emit  # type: ignore[method-assign]
+
+        result_holder: Dict[str, Any] = {}
+        err_holder: List[BaseException] = []
+
+        def _worker() -> None:
+            try:
+                result = self._m.run(task)  # type: ignore[union-attr]
+                result_holder.update(result)
+            except BaseException as exc:  # noqa: BLE001
+                err_holder.append(exc)
+            finally:
+                ev_queue.put(_SENTINEL)
+
+        self._thread = threading.Thread(target=_worker, daemon=True, name="matrioska-arun")
+        self._thread.start()
+
+        # ── Yield events until sentinel ────────────────────────────────
+        while True:
+            item = ev_queue.get()
+            if item is _SENTINEL:
+                break
+            yield item
+
+        self._thread.join(timeout=5)
+
+        if err_holder:
+            error_event = {
+                "event": "run_error",
+                "data": {"error": str(err_holder[0])},
+                "timestamp": time.time(),
+            }
+            yield error_event
+            return
+
+        # Emit a synthetic run_end with the full result dict (serialisable subset)
+        artifacts = result_holder.get("artifacts") or []
+        yield {
+            "event": "run_end",
+            "data": {
+                "status": result_holder.get("status", "unknown"),
+                "project_name": result_holder.get("project_name", ""),
+                "files": [
+                    {
+                        "name": getattr(a, "name", "?"),
+                        "extension": getattr(a, "extension", "?"),
+                        "status": getattr(a, "status", "?"),
+                        "chars": len(getattr(a, "content", "")),
+                    }
+                    for a in artifacts
+                ],
+                "tokens": result_holder.get("tokens") or {},
+                "work_dir": result_holder.get("work_dir", ""),
+            },
+            "timestamp": time.time(),
+        }
+
+    def close(self) -> None:
+        """Clean up resources (join worker thread if still running)."""
+        if self._thread is not None:
+            self._thread.join(timeout=10)
+            self._thread = None
+        self._m = None
+        self._closed = True
+
+
+def arun(task: str, cfg: Optional[Config] = None, **config_overrides: Any) -> Iterator[Dict[str, Any]]:
+    """Streaming entry-point: yield pipeline events for *task*.
+
+    Example::
+
+        for event in arun("Build a FastAPI service"):
+            print(event["event"], event["data"])
+    """
+    if config_overrides:
+        cfg = load_config(config_overrides)
+    client = MatrioskaStreaming(cfg)
+    try:
+        yield from client.arun(task)
+    finally:
+        client.close()
 
 
 def run_with_config(task: str, **config_overrides: Any) -> Dict[str, Any]:

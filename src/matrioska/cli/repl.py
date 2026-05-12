@@ -89,6 +89,30 @@ class Repl:
         self._console = self._make_console()
         self._stream_buffer: List[str] = []
         self._stream_active = False
+        self._load_custom_commands()
+
+    def _load_custom_commands(self) -> None:
+        """Scan .matrioska/commands/*.md and register each as a slash command."""
+        commands_dir = Path.cwd() / ".matrioska" / "commands"
+        if not commands_dir.is_dir():
+            return
+        for f in commands_dir.glob("*.md"):
+            name = f.stem.replace("-", "_")
+            try:
+                content = f.read_text(encoding="utf-8").strip()
+            except Exception:
+                continue
+            if not content:
+                continue
+            help_text = content.splitlines()[0].lstrip("# ").strip() if content else f.name
+
+            def _make_cmd(task_content: str) -> CommandFn:
+                def _cmd(repl: "Repl", args: List[str]) -> None:
+                    repl._run_task(task_content)
+                return _cmd
+
+            COMMANDS[name] = _make_cmd(content)
+            HELP[name] = f"[custom] {help_text}"
 
     def _make_console(self) -> Any:
         try:
@@ -581,43 +605,265 @@ def _cmd_btw(repl: Repl, args: List[str]) -> None:
         repl._print(f"  error: {e}")
 
 
-@command("vault", "Vault ops: /vault search <q> | list | doctor | graph")
+@command(
+    "vault",
+    "Vault ops: search <q> [--scope] | project <n> | concept <n> | related <n> | doctor | list | graph",
+)
 def _cmd_vault(repl: Repl, args: List[str]) -> None:
     from matrioska.memory.vault import GlobalVault, default_vault_dir
+
     root = Path(repl.cfg.vault_dir).expanduser() if repl.cfg.vault_dir else default_vault_dir()
     vault = GlobalVault(root)
+
+    # ── no subcommand → project listing ──────────────────────────────────
     if not args:
-        repl._print(f"  vault: {vault.root}")
-        for p in vault.list_projects():
-            repl._print(f"    {p['name']:<30} notes={p['notes']}  last={p['last_run']}")
+        repl._print(f"  vault root: [cyan]file://{vault.root}[/]" if repl._console
+                    else f"  vault root: file://{vault.root}")
+        projects = vault.list_projects()
+        if not projects:
+            repl._print("  (no projects yet)")
+            return
+        _vault_print_projects(repl, projects)
         return
+
     sub = args[0]
     rest = args[1:]
+
     if sub == "list":
-        for p in vault.list_projects():
-            repl._print(f"  {p['name']:<30} notes={p['notes']}  last={p['last_run']}")
-    elif sub == "search":
-        if not rest:
-            repl._print("  usage: /vault search <query>")
+        projects = vault.list_projects()
+        if not projects:
+            repl._print("  (no projects yet)")
             return
-        for r in vault.search(" ".join(rest), scope="all", k=5):
-            repl._print(f"  [{r['score']:.1f}] {r['kind']:7s} {r['title']}")
-            repl._print(f"      {r['snippet'][:120]}")
+        _vault_print_projects(repl, projects)
+
+    elif sub == "search":
+        # Parse --scope flag
+        scope = "all"
+        query_parts: List[str] = []
+        i = 0
+        while i < len(rest):
+            if rest[i] == "--scope" and i + 1 < len(rest):
+                scope = rest[i + 1]
+                i += 2
+            else:
+                query_parts.append(rest[i])
+                i += 1
+        query = " ".join(query_parts)
+        if not query:
+            repl._print("  usage: /vault search <query> [--scope local|global|linked|all]")
+            return
+        valid_scopes = {"local", "global", "linked", "all"}
+        if scope not in valid_scopes:
+            repl._print(f"  invalid scope '{scope}'. Choose from: {', '.join(sorted(valid_scopes))}")
+            return
+        results = vault.search(query, scope=scope, k=8)
+        if not results:
+            repl._print(f"  no results for '{query}' (scope={scope})")
+            return
+        repl._print(f"\n  [bold]Search:[/] {query}  [dim](scope={scope}, {len(results)} hits)[/]"
+                    if repl._console else f"\n  Search: {query}  (scope={scope}, {len(results)} hits)")
+        for r in results:
+            path_str = str(vault.root / r["path"])
+            link = f"file://{path_str}"
+            score_badge = f"[{r['score']:.1f}]"
+            kind_badge = r["kind"].upper()[:7]
+            if repl._console:
+                repl._print(
+                    f"  {score_badge} [yellow]{kind_badge}[/]  "
+                    f"[bold]{r['title']}[/]  [dim link={link}]{link}[/]"
+                )
+                repl._print(f"      [dim]{r['snippet'][:160]}[/]")
+            else:
+                repl._print(f"  {score_badge} {kind_badge}  {r['title']}  {link}")
+                repl._print(f"      {r['snippet'][:160]}")
+
+    elif sub == "project":
+        if not rest:
+            repl._print("  usage: /vault project <name>")
+            return
+        proj_name = rest[0]
+        proj_dir = vault.projects_dir / proj_name
+        if not proj_dir.is_dir():
+            repl._print(f"  project '{proj_name}' not found in vault")
+            return
+        for note_name in ("architecture", "patterns"):
+            note_path = proj_dir / f"{note_name}.md"
+            link = f"file://{note_path}"
+            if repl._console:
+                repl._print(f"\n  [bold cyan]{note_name}.md[/]  [dim link={link}]{link}[/]")
+            else:
+                repl._print(f"\n  {note_name}.md  {link}")
+            if note_path.exists():
+                content = note_path.read_text(encoding="utf-8", errors="ignore")
+                repl._print(content[:2000])
+            else:
+                repl._print("  (not found)")
+
+    elif sub == "concept":
+        if not rest:
+            repl._print("  usage: /vault concept <name>")
+            return
+        concept_name = rest[0]
+        concept_path = vault.concepts_dir / f"{concept_name}.md"
+        link = f"file://{concept_path}"
+        if not concept_path.exists():
+            repl._print(f"  concept '{concept_name}' not found")
+            repl._print("  known concepts: " + ", ".join(
+                p.stem for p in vault.concepts_dir.glob("*.md")
+            ) if vault.concepts_dir.exists() else "  concepts dir empty")
+            return
+        if repl._console:
+            repl._print(f"\n  [bold cyan]{concept_name}.md[/]  [dim link={link}]{link}[/]")
+        else:
+            repl._print(f"\n  {concept_name}.md  {link}")
+        repl._print(concept_path.read_text(encoding="utf-8", errors="ignore")[:2000])
+
+    elif sub == "related":
+        if not rest:
+            repl._print("  usage: /vault related <project>")
+            return
+        proj_name = rest[0]
+        related = sorted(vault._linked_projects(proj_name, max_hops=2) - {proj_name})
+        if repl._console:
+            repl._print(f"\n  [bold]Related to[/] [cyan]{proj_name}[/] (via wikilinks, ≤2 hops):")
+        else:
+            repl._print(f"\n  Related to {proj_name} (via wikilinks, <=2 hops):")
+        if not related:
+            repl._print("  (none found)")
+            return
+        for name in related:
+            proj_path = vault.projects_dir / name
+            link = f"file://{proj_path}"
+            if repl._console:
+                repl._print(f"    • [cyan]{name}[/]  [dim link={link}]{link}[/]")
+            else:
+                repl._print(f"    - {name}  {link}")
+
     elif sub == "doctor":
         d = vault.doctor()
-        repl._print(
-            f"  projects={d['projects']} concepts={d['concepts']} bugs={d['bugs']} "
-            f"total={d['total_notes']}  status={d['status']}"
-        )
+        status_color = "green" if d["status"] == "healthy" else "red"
+        if repl._console:
+            repl._print(
+                f"\n  [bold]Vault Health Report[/]\n"
+                f"  projects=[cyan]{d['projects']}[/]  concepts=[cyan]{d['concepts']}[/]  "
+                f"bugs=[cyan]{d['bugs']}[/]  total_notes=[cyan]{d['total_notes']}[/]\n"
+                f"  status=[{status_color}]{d['status']}[/]"
+            )
+        else:
+            repl._print(
+                f"\n  Vault Health: projects={d['projects']} concepts={d['concepts']} "
+                f"bugs={d['bugs']} total={d['total_notes']}  status={d['status']}"
+            )
         if d["orphans"]:
-            repl._print(f"  orphans: {len(d['orphans'])}")
+            repl._print(f"  orphan notes ({len(d['orphans'])}):")
+            for o in d["orphans"][:10]:
+                repl._print(f"    - {o}")
         if d["broken_links"]:
-            repl._print(f"  broken_links: {len(d['broken_links'])}")
+            repl._print(f"  broken wikilinks ({len(d['broken_links'])}):")
+            for bl in d["broken_links"][:10]:
+                repl._print(f"    - {bl['from']} → [[{bl['target']}]]")
+        if d.get("stale"):
+            repl._print(f"  stale notes (>30d): {len(d['stale'])}")
+
     elif sub == "graph":
         out = vault.export_graph_mermaid()
         repl._print(out[:1500])
+
     else:
-        repl._print(f"  unknown /vault subcommand: {sub}")
+        repl._print(f"  unknown /vault subcommand: '{sub}'")
+        repl._print("  subcommands: search | project | concept | related | doctor | list | graph")
+
+
+def _vault_print_projects(repl: Repl, projects: List[Dict[str, Any]]) -> None:
+    """Render vault project listing with Rich if available."""
+    try:
+        from rich.table import Table
+        if repl._console is None:
+            raise ImportError
+        table = Table(title="Vault Projects", show_header=True, header_style="bold cyan")
+        table.add_column("Name", style="cyan", no_wrap=True)
+        table.add_column("Notes", justify="right")
+        table.add_column("Last Run")
+        table.add_column("Link", style="dim")
+        vault_root = Path(repl.cfg.vault_dir).expanduser() if repl.cfg.vault_dir else None
+        try:
+            from matrioska.memory.vault import default_vault_dir
+            vault_root = vault_root or default_vault_dir()
+        except Exception:
+            vault_root = Path.home() / ".matrioska" / "vault"
+        for p in projects:
+            proj_path = vault_root / "projects" / p["name"]
+            table.add_row(
+                p["name"],
+                str(p["notes"]),
+                p["last_run"],
+                f"file://{proj_path}",
+            )
+        repl._console.print(table)
+    except (ImportError, Exception):
+        for p in projects:
+            repl._print(f"  {p['name']:<30} notes={p['notes']}  last={p['last_run']}")
+
+
+@command("rewind", "Revert to a previous pipeline checkpoint")
+def _cmd_rewind(repl: Repl, args: List[str]) -> None:
+    from matrioska.core.state import StateGraph
+
+    graph = StateGraph(Path(repl.cfg.work_dir))
+    checkpoints = graph.list_checkpoints()
+    if not checkpoints:
+        repl._print("  no checkpoints found in work_dir")
+        return
+
+    # If a specific checkpoint id or index is given, use it; otherwise show the list
+    target_id: Optional[str] = None
+    if args:
+        raw = args[0]
+        # Accept numeric index (1-based)
+        if raw.isdigit():
+            idx = int(raw) - 1
+            if 0 <= idx < len(checkpoints):
+                target_id = checkpoints[idx]["id"]
+            else:
+                repl._print(f"  index out of range (1–{len(checkpoints)})")
+                return
+        else:
+            # Accept checkpoint id prefix
+            matches = [c for c in checkpoints if c["id"].startswith(raw)]
+            if not matches:
+                repl._print(f"  no checkpoint matching '{raw}'")
+                return
+            target_id = matches[0]["id"]
+    else:
+        # No arg — show table and prompt, or fall back to most recent
+        repl._print("\n  Available checkpoints:")
+        for i, cp in enumerate(checkpoints, 1):
+            repl._print(
+                f"    {i}. [{cp['id'][:8]}]  {cp['label']:<22}  {cp['status']:<12}  {cp['created_at'][:19]}"
+            )
+        repl._print("\n  Usage: /rewind <index|id-prefix>  (no arg = load most recent)")
+        # Default to most recent (last in list)
+        target_id = checkpoints[-1]["id"]
+        repl._print(f"  → loading most recent: [{target_id[:8]}] {checkpoints[-1]['label']}")
+
+    try:
+        state = graph.load_checkpoint(target_id)
+        repl._print(
+            f"  rewound to checkpoint [{target_id[:8]}]  "
+            f"status={state.status.value}  project={state.project_name or '—'}"
+        )
+        # Store in session so subsequent /diff can reference it
+        repl.session.last_result = {
+            "status": state.status.value,
+            "project_name": state.project_name,
+            "artifacts": list(state.artifacts.values()),
+            "shared_state": state.shared_state,
+            "tokens": {},
+        }
+    except FileNotFoundError as exc:
+        repl._print(f"  checkpoint not found: {exc}")
+    except Exception as exc:
+        repl._print(f"  failed to load checkpoint: {exc}")
 
 
 @command("stream", "Toggle token streaming on/off for the next task")
