@@ -42,52 +42,52 @@ class Config:
     """
 
     # ── Provider defaults ─────────────────────────────────────────────────
-    provider: str = "openai"
-    base_url: str = "https://api.openai.com/v1"
-    api_key: Optional[str] = None
-    model: str = "gpt-4o-mini"
+    provider: str = "openai"                            # env: MATRIOSKA_PROVIDER
+    base_url: str = "https://api.openai.com/v1"         # env: MATRIOSKA_BASE_URL
+    api_key: Optional[str] = None                       # env: MATRIOSKA_API_KEY
+    model: str = "gpt-4o-mini"                          # env: MATRIOSKA_MODEL
 
     # ── Role-specific models (override the default) ───────────────────────
-    architect_model: str = ""
-    architect_provider: str = ""
-    generator_model: str = ""
-    generator_provider: str = ""
-    validator_model: str = ""
-    validator_provider: str = ""
-    judge_model: str = ""
-    judge_provider: str = ""
-    repairer_model: str = ""
-    repairer_provider: str = ""
+    architect_model: str = ""                           # env: MATRIOSKA_ARCHITECT_MODEL
+    architect_provider: str = ""                        # env: MATRIOSKA_ARCHITECT_PROVIDER
+    generator_model: str = ""                           # env: MATRIOSKA_GENERATOR_MODEL
+    generator_provider: str = ""                        # env: MATRIOSKA_GENERATOR_PROVIDER
+    validator_model: str = ""                           # env: MATRIOSKA_VALIDATOR_MODEL
+    validator_provider: str = ""                        # env: MATRIOSKA_VALIDATOR_PROVIDER
+    judge_model: str = ""                               # env: MATRIOSKA_JUDGE_MODEL
+    judge_provider: str = ""                            # env: MATRIOSKA_JUDGE_PROVIDER
+    repairer_model: str = ""                            # env: MATRIOSKA_REPAIRER_MODEL
+    repairer_provider: str = ""                         # env: MATRIOSKA_REPAIRER_PROVIDER
 
     # ── Pipeline ──────────────────────────────────────────────────────────
-    work_dir: Path = field(default_factory=lambda: Path("./matrioska_work"))
-    max_tokens: int = 4096
-    temperature: float = 0.3
-    max_repairs: int = 2
-    max_depth: int = 2
-    parallel: bool = True
-    plan_only: bool = False
+    work_dir: Path = field(default_factory=lambda: Path("./matrioska_work"))  # env: MATRIOSKA_WORK_DIR
+    max_tokens: int = 4096                              # env: MATRIOSKA_MAX_TOKENS
+    temperature: float = 0.3                            # env: MATRIOSKA_TEMPERATURE
+    max_repairs: int = 2                                # env: MATRIOSKA_MAX_REPAIRS
+    max_depth: int = 2                                  # env: MATRIOSKA_MAX_DEPTH
+    parallel: bool = True                               # env: MATRIOSKA_PARALLEL
+    plan_only: bool = False                             # env: MATRIOSKA_PLAN_ONLY
 
     # ── Phase 1: Architecture ─────────────────────────────────────────────
-    architect_candidates: int = 3       # N for Tree-of-Thoughts
-    architect_temperature: float = 0.7  # Higher for diversity
-    enable_tot: bool = True             # Enable Tree-of-Thoughts voting
+    architect_candidates: int = 3       # N for Tree-of-Thoughts  # env: MATRIOSKA_ARCHITECT_CANDIDATES
+    architect_temperature: float = 0.7  # Higher for diversity    # env: MATRIOSKA_ARCHITECT_TEMPERATURE
+    enable_tot: bool = True             # Enable Tree-of-Thoughts voting  # env: MATRIOSKA_ENABLE_TOT
 
     # ── Phase 2: Generation ───────────────────────────────────────────────
-    enable_reflexion: bool = True       # Enable Reflexion loop
-    enable_debate: bool = False         # Multi-agent debate for complex files
-    enable_test_design: bool = True     # AlphaCodium+AgentCoder: design tests before generating
-    use_aci_repair: bool = True         # SWE-agent ACI: targeted patch repair vs full-file rewrite
+    enable_reflexion: bool = True       # Enable Reflexion loop              # env: MATRIOSKA_ENABLE_REFLEXION
+    enable_debate: bool = False         # Multi-agent debate for complex files  # env: MATRIOSKA_ENABLE_DEBATE
+    enable_test_design: bool = True     # AlphaCodium+AgentCoder: design tests before generating  # env: MATRIOSKA_ENABLE_TEST_DESIGN
+    use_aci_repair: bool = True         # SWE-agent ACI: targeted patch repair vs full-file rewrite  # env: MATRIOSKA_USE_ACI_REPAIR
 
     # ── Phase 3: Verification ─────────────────────────────────────────────
-    enable_sandbox: bool = False        # Docker sandbox execution
-    sandbox_timeout: int = 30           # Max execution seconds
-    sandbox_image: str = "python:3.11-slim"
+    enable_sandbox: bool = False        # Docker sandbox execution  # env: MATRIOSKA_ENABLE_SANDBOX
+    sandbox_timeout: int = 30           # Max execution seconds     # env: MATRIOSKA_SANDBOX_TIMEOUT
+    sandbox_image: str = "python:3.11-slim"                         # env: MATRIOSKA_SANDBOX_IMAGE
 
     # ── Memory ────────────────────────────────────────────────────────────
-    retrieve_k: int = 3
-    embedder_model: str = "text-embedding-3-small"
-    enable_graphrag: bool = False
+    retrieve_k: int = 3                                 # env: MATRIOSKA_RETRIEVE_K
+    embedder_model: str = "text-embedding-3-small"      # env: MATRIOSKA_EMBEDDER_MODEL
+    enable_graphrag: bool = False                       # env: MATRIOSKA_ENABLE_GRAPHRAG
 
     # ── Multi-key / multi-endpoint rotation ──────────────────────────────────
     # api_keys: comma-separated API keys for the primary provider (round-robin)
@@ -96,18 +96,20 @@ class Config:
     # Example .env:
     #   MATRIOSKA_API_KEYS=gsk_key1,gsk_key2,gsk_key3
     #   MATRIOSKA_EXTRA_ENDPOINTS=[{"provider":"deepseek","base_url":"https://api.deepseek.com/v1","api_key":"ds_xxx","model":"deepseek-coder-v2"}]
-    api_keys: str = ""
-    extra_endpoints: str = ""
+    api_keys: str = ""                                  # env: MATRIOSKA_API_KEYS
+    extra_endpoints: str = ""                           # env: MATRIOSKA_EXTRA_ENDPOINTS
 
     # ── Circuit breaker ───────────────────────────────────────────────────
+    # Note: CircuitBreakerConfig sub-fields are not mapped to individual env vars;
+    #   use MATRIOSKA_CIRCUIT_BREAKER_* prefix when implementing sub-field loading.
     circuit_breaker: CircuitBreakerConfig = field(default_factory=CircuitBreakerConfig)
-    failover_providers: List[str] = field(default_factory=list)
+    failover_providers: List[str] = field(default_factory=list)     # env: MATRIOSKA_FAILOVER_PROVIDERS (comma-separated)
 
     # ── Observability ─────────────────────────────────────────────────────
-    log_level: str = "INFO"
-    enable_otel: bool = False
-    otel_endpoint: str = ""
-    enable_cost_tracking: bool = True
+    log_level: str = "INFO"             # env: MATRIOSKA_LOG_LEVEL
+    enable_otel: bool = False           # env: MATRIOSKA_ENABLE_OTEL
+    otel_endpoint: str = ""             # env: MATRIOSKA_OTEL_ENDPOINT
+    enable_cost_tracking: bool = True   # env: MATRIOSKA_ENABLE_COST_TRACKING
 
     # ── Incremental / surgical mode ───────────────────────────────────────
     # incremental=True: pre-flight scans existing files and injects them into
@@ -116,10 +118,10 @@ class Config:
     # execute_feedback=True: after each file is generated, run it in a
     #   subprocess and feed stderr back to the Repairer as repair signal.
     # install_deps=True: after Phase 2, auto-install detected pip packages.
-    incremental: bool = False
-    project_dir: str = ""
-    execute_feedback: bool = True
-    install_deps: bool = True
+    incremental: bool = False           # env: MATRIOSKA_INCREMENTAL
+    project_dir: str = ""               # env: MATRIOSKA_PROJECT_DIR
+    execute_feedback: bool = True       # env: MATRIOSKA_EXECUTE_FEEDBACK
+    install_deps: bool = True           # env: MATRIOSKA_INSTALL_DEPS
 
     # ── Quick mode / permissions / vault ──────────────────────────────────
     # quick=True: skip ToT, Reflexion, TestDesign, ACI, and Phase 3. Useful
@@ -128,10 +130,10 @@ class Config:
     #   plan_only), "ask" (pause and confirm before each file generation).
     # enable_vault: writes/reads ~/.matrioska/vault (global Obsidian-compatible
     #   knowledge base). Disable for ephemeral CI runs.
-    quick: bool = False
-    permission_mode: str = "auto"  # auto | plan | ask
-    enable_vault: bool = True
-    vault_dir: str = ""  # default: ~/.matrioska/vault
+    quick: bool = False                 # env: MATRIOSKA_QUICK
+    permission_mode: str = "auto"       # auto | plan | ask  # env: MATRIOSKA_PERMISSION_MODE
+    enable_vault: bool = True           # env: MATRIOSKA_ENABLE_VAULT
+    vault_dir: str = ""                 # default: ~/.matrioska/vault  # env: MATRIOSKA_VAULT_DIR
 
     # ── Multi-planning ────────────────────────────────────────────────────
     # enable_multi_plan=True: before Phase 1, a MetaPlanner decomposes the task
@@ -144,22 +146,22 @@ class Config:
     # stream_tokens=True: openai-compatible chat uses SSE and emits per-chunk
     # `llm_token` events through the event bus. Token deltas are accumulated
     # into ChatResponse.text exactly as the non-streaming path returns.
-    stream_tokens: bool = True
+    stream_tokens: bool = True          # env: MATRIOSKA_STREAM_TOKENS
 
     # ── MoE extension map override ────────────────────────────────────────
     # JSON string mapping file extension → model name.  Merged with (and
     # overrides) the hardcoded defaults in llm/circuit.py.
     # Example: '{"py": "gpt-4o", "sql": "deepseek-coder-v2"}'
-    moe_extension_map: str = ""
+    moe_extension_map: str = ""         # env: MATRIOSKA_MOE_EXTENSION_MAP
 
     # ── Validation ────────────────────────────────────────────────────────
     # skip_validation=True: skip provider connectivity check on startup.
-    skip_validation: bool = False
+    skip_validation: bool = False       # env: MATRIOSKA_SKIP_VALIDATION
 
     # ── Misc ──────────────────────────────────────────────────────────────
-    thinking: bool = False
-    dry_run: bool = False
-    interactive: bool = False
+    thinking: bool = False              # env: MATRIOSKA_THINKING
+    dry_run: bool = False               # env: MATRIOSKA_DRY_RUN
+    interactive: bool = False           # env: MATRIOSKA_INTERACTIVE
 
     # ── Derived ───────────────────────────────────────────────────────────
 

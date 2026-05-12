@@ -27,6 +27,13 @@ class GoldenTask:
     notes: str = ""
 
 
+# TODO: Move GOLDEN_TASKS and their baseline expectations to a data file
+#   (e.g. src/matrioska/eval/golden_tasks.json or golden_tasks.yaml) so
+#   the task corpus can be extended without touching Python source.
+#   The GoldenTask dataclass would remain here as the schema, and this
+#   list would be populated by a loader function at import time.
+#   Blocked on: deciding whether to use JSON (simpler) or YAML (more readable).
+
 # ── Golden Tasks (30 tasks across 6 categories) ──────────────────────────────
 
 GOLDEN_TASKS: List[GoldenTask] = [

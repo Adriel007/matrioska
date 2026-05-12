@@ -91,7 +91,7 @@ class Matrioska:
             self.semantic = SemanticMemory(self.work_dir)
         except Exception as e:
             logger.warning("SemanticMemory unavailable (chromadb/ONNX?): %s", e)
-            self.semantic = None  # type: ignore
+            self.semantic = None  # type: ignore[assignment]  # Optional[SemanticMemory]; None on ChromaDB failure
         self.procedural = ProceduralMemory(self.work_dir)
         self.procedural.ensure_project_memory()
 
@@ -105,7 +105,7 @@ class Matrioska:
         if not self.cfg.dry_run:
             self.llm = LLMClient(self.cfg, bus=self.bus)
         else:
-            self.llm = None  # type: ignore
+            self.llm = None  # type: ignore[assignment]  # Optional[LLMClient]; None in dry_run mode
 
     def _check_control(self) -> None:
         """Honour pause/abort signals from the dashboard.

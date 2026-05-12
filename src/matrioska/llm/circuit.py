@@ -328,6 +328,14 @@ def is_small_model(model: str) -> bool:
 
 # ── MoE-style routing by file extension ──────────────────────────────────────
 
+# NOTE: model names here are provider-specific magic strings.
+#   They are NOT validated at startup — a typo will surface only at
+#   the first LLM call for a file with that extension.
+#   Override via cfg.moe_extension_map (JSON str) or MATRIOSKA_MOE_EXTENSION_MAP.
+#   The `isinstance` checks in LLMClient dispatch (provider == "hf", "ollama",
+#   "anthropic") are intentional string comparisons, not isinstance hacks;
+#   they match the Config.provider field values.
+
 import json as _json
 
 _DEFAULT_EXTENSION_MODEL_MAP: Dict[str, str] = {

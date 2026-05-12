@@ -638,6 +638,23 @@ class LLMClient:
         json_mode: bool,
         spec: ModelSpec,
     ) -> ChatResponse:
+        """HuggingFace local inference provider.
+
+        Status: NOT YET IMPLEMENTED in V3.
+
+        The v2 implementation used ``transformers.pipeline`` with a local
+        ``AutoModelForCausalLM``.  It has not been ported to V3 because the
+        OpenAI-compatible Ollama / vLLM path covers the same hardware target
+        more reliably.
+
+        To use local HuggingFace models today:
+          1. Serve with Ollama (``ollama run <model>``) and set
+             ``provider=ollama, base_url=http://localhost:11434``.
+          2. Serve with vLLM (``vllm serve <model>``) and set
+             ``provider=openai, base_url=http://localhost:8000/v1``.
+
+        Contributions welcome — see TODO.md "HuggingFace provider".
+        """
         raise NotImplementedError(
             "HuggingFace local provider is not yet ported to v3. "
             "Use the OpenAI-compatible endpoint (ollama/vllm) instead."

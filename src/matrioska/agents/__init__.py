@@ -9,3 +9,21 @@ Each agent role has a specialized model assignment:
   Repairer  → debugging focus (same as Generator)
   Reflector → meta-cognitive (same as Judge)
 """
+
+from matrioska.agents.architect import ArchitectAgent
+from matrioska.agents.generator import GeneratorAgent
+from matrioska.agents.validator import ValidatorAgent
+from matrioska.agents.judge import JudgeAgent
+from matrioska.agents.repairer import RepairerAgent
+from matrioska.agents.reflector import ReflectorAgent
+from matrioska.agents.test_designer import TestDesignerAgent
+
+__all__ = [
+    "ArchitectAgent",
+    "GeneratorAgent",
+    "ValidatorAgent",
+    "JudgeAgent",
+    "RepairerAgent",
+    "ReflectorAgent",
+    "TestDesignerAgent",
+]
