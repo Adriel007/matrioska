@@ -18,9 +18,10 @@
 - [ ] **HuggingFace provider** — `_hf_chat()` still raises `NotImplementedError`.
   Port the v2 HuggingFace integration or support any Transformers pipeline.
 
-- [ ] **Provider-aware token costing** — `TokenTracker._estimate_cost()` uses
-  hardcoded GPT/Claude pricing. Add a pricing table per provider (OpenAI, Anthropic,
-  Groq, NVIDIA, Ollama) or make it configurable via `.env`.
+- [x] **Provider-aware token costing** — `events.py::estimate_cost()` with `_PRICING`
+  table covering OpenAI, Anthropic, Groq, DeepSeek, Mistral, Together, NVIDIA.
+  Lookup: exact → prefix (longest wins) → substring fallback. Override via
+  `MATRIOSKA_COST_PER_PROMPT_TOKEN` / `MATRIOSKA_COST_PER_COMPLETION_TOKEN` env vars.
 
 - [ ] **Configurable MoE extension map** — `EXTENSION_MODEL_MAP` is hardcoded in
   `circuit.py`. Load from config so users can define their own per-extension routing
@@ -99,9 +100,9 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   TAB/↓ opens menu, arrows navigate, Enter selects, Esc dismisses. Also fixed
   `EventBus.emit` wildcard bug: `"*"` handlers were never fired (silent dashboard/recorder).
 
-- [ ] **Rewind / checkpoint** — no REPL, `Esc+Esc` ou `/rewind` volta ao último
-  checkpoint salvo (desfaz geração da última rodada). StateGraph já tem checkpoints —
-  falta expor no REPL.
+- [x] **Rewind / checkpoint** — `/rewind` no REPL lista checkpoints disponíveis, aceita
+  índice ou prefixo de ID, carrega o estado no `session.last_result` para uso com `/diff`.
+  StateGraph.list_checkpoints() + load_checkpoint() já existiam — apenas expostos.
 
 - [ ] **Comandos customizados** — arquivos `.matrioska/commands/meu-cmd.md` criam
   `/meu-cmd` como slash command no REPL. Conteúdo do arquivo vira prompt injetado.
@@ -118,6 +119,11 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
 
 - [ ] **Model validation on startup** — When `--dry-run` is not set, validate that
   the configured model(s) exist on the provider before spending tokens.
+
+- [x] **Design cockpit** — Dynamic layout sizing based on terminal height. Events panel
+  grows to fill available space (deque maxlen=50, displays last N that fit). Progress
+  panel smart-truncates: always shows generating/failed files; pending shown as
+  summary badge; done files fill remaining budget. Sizes recomputed each render frame.
 
 ## MCP Server & API
 

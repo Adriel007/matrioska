@@ -91,8 +91,8 @@ class DashboardState:
     files: List[FileState] = field(default_factory=list)
     current_file: str = ""
 
-    # Events log (newest last, capped)
-    events: Deque[str] = field(default_factory=lambda: deque(maxlen=12))
+    # Events log (newest last). Large buffer — display window computed per render.
+    events: Deque[str] = field(default_factory=lambda: deque(maxlen=50))
 
     # Control
     paused: bool = False
@@ -379,56 +379,93 @@ def _render_slots(state: DashboardState) -> Panel:
     return Panel(Group(tbl, tok_text), title="[bold]API SLOTS[/]", border_style="cyan", padding=(0, 1))
 
 
-def _render_progress(state: DashboardState) -> Panel:
+def _render_progress(state: DashboardState, max_rows: int = 14) -> Panel:
     lines: List[Text] = []
 
     if not state.files:
         lines.append(Text("Waiting for architecture…", style="dim italic"))
     else:
-        done = sum(1 for f in state.files if f.status == "done")
-        failed = sum(1 for f in state.files if f.status == "failed")
-        total = len(state.files)
-        pct = done / total if total else 0
+        done_files    = [f for f in state.files if f.status == "done"]
+        failed_files  = [f for f in state.files if f.status == "failed"]
+        active_files  = [f for f in state.files if f.status == "generating"]
+        pending_files = [f for f in state.files if f.status == "pending"]
 
-        bar_w = 24
+        total  = len(state.files)
+        n_done = len(done_files)
+        pct    = n_done / total if total else 0
+
+        # Progress bar
+        bar_w  = 24
         filled = int(bar_w * pct)
         bar = Text()
         bar.append("█" * filled, style="green")
         bar.append("░" * (bar_w - filled), style="dim")
-        bar.append(f"  {done}/{total} files", style="bold")
-        if failed:
-            bar.append(f"  ({failed} failed)", style="red")
+        bar.append(f"  {n_done}/{total}", style="bold")
+        if failed_files:
+            bar.append(f"  {len(failed_files)} failed", style="red")
+        if pending_files:
+            bar.append(f"  {len(pending_files)} pending", style="dim")
         lines.append(bar)
         lines.append(Text(""))
 
-        for f in state.files:
+        def _file_row(f: FileState) -> Text:
             icon, style = {
-                "done": ("✓", "green"),
-                "failed": ("✗", "red"),
-                "generating": ("⟳", "bold yellow"),
-                "pending": ("○", "dim"),
+                "done":      ("✓", "green"),
+                "failed":    ("✗", "red"),
+                "generating":("⟳", "bold yellow"),
+                "pending":   ("○", "dim"),
             }.get(f.status, ("?", "dim"))
-
             row = Text()
             row.append(f"  {icon} ", style=style)
-            row.append(f"{f.name}", style="bold" if f.status == "generating" else "")
+            row.append(f.name, style="bold" if f.status == "generating" else "")
             if f.status == "done":
                 row.append(f"  {f.chars:,}c", style="dim")
                 if f.attempts > 1:
-                    row.append(f"  ({f.attempts} attempts)", style="dim red")
+                    row.append(f"  ({f.attempts}×)", style="dim red")
             elif f.status == "generating":
                 row.append("  …", style="yellow blink")
             elif f.status == "failed":
                 row.append("  ✗ exhausted", style="red dim")
-            lines.append(row)
+            return row
+
+        # Priority: active > failed > recent done > pending summary
+        budget = max_rows - 2  # subtract bar + blank line
+        shown: List[FileState] = []
+        shown.extend(active_files)
+        shown.extend(failed_files)
+
+        # Fill remaining budget with most-recently-done files
+        done_budget = budget - len(shown)
+        hidden_done = 0
+        if done_budget > 0:
+            shown.extend(done_files[-done_budget:])
+            hidden_done = max(0, n_done - done_budget)
+        else:
+            hidden_done = n_done
+
+        for f in shown:
+            lines.append(_file_row(f))
+
+        # Summaries for hidden files
+        if hidden_done > 0:
+            t = Text(f"  ✓ …and {hidden_done} more done", style="dim green")
+            lines.append(t)
+        if pending_files:
+            t = Text(f"  ○ {len(pending_files)} pending", style="dim")
+            lines.append(t)
 
     return Panel(Group(*lines), title="[bold]PROGRESS[/]", border_style="green", padding=(0, 1))
 
 
-def _render_events(state: DashboardState) -> Panel:
-    lines = [Text.from_markup(e) for e in state.events]
+def _render_events(state: DashboardState, max_lines: int = 14) -> Panel:
+    # Always show the *newest* max_lines events (auto-scroll to bottom).
+    visible = list(state.events)[-max_lines:]
+    lines = [Text.from_markup(e) for e in visible]
     if not lines:
         lines = [Text("No events yet.", style="dim italic")]
+    hidden = len(state.events) - len(visible)
+    if hidden > 0:
+        lines.insert(0, Text(f"  ↑ {hidden} older events", style="dim"))
     return Panel(Group(*lines), title="[bold]EVENTS[/]", border_style="dim", padding=(0, 1))
 
 
@@ -459,12 +496,31 @@ def _render_pause_overlay(state: DashboardState, cfg: Any) -> Panel:
     return Panel(Group(grid, hint), title=title, border_style=border, padding=(0, 2))
 
 
-def render(state: DashboardState) -> Layout:
+def render(state: DashboardState, term_height: int = 40) -> Layout:
+    """Render the full cockpit layout.
+
+    Sizes are computed dynamically so every panel gets as much vertical space
+    as the terminal offers — events and progress auto-scroll to newest content.
+    """
+    HEADER_H = 6
+
+    # Middle panel: enough for slots or files, capped so events always visible
+    min_middle = max(len(state.slots) + 4, min(len(state.files) + 4, 14), 8)
+    max_middle = max(min_middle, term_height - HEADER_H - 10)
+    middle_h   = min(min_middle, max_middle)
+
+    # Events: the remainder, min 8
+    events_h   = max(8, term_height - HEADER_H - middle_h - 1)
+
+    # Content budgets (subtract borders/padding)
+    max_file_rows  = max(4, middle_h - 4)
+    max_event_lines = max(4, events_h - 2)
+
     layout = Layout()
     layout.split_column(
-        Layout(name="header", size=6),
-        Layout(name="middle", size=max(len(state.slots) + 5, len(state.files) + 5, 10)),
-        Layout(name="events", size=16),
+        Layout(name="header", size=HEADER_H),
+        Layout(name="middle", size=middle_h),
+        Layout(name="events", size=events_h),
     )
     layout["middle"].split_row(
         Layout(name="slots", minimum_size=30, ratio=2),
@@ -473,8 +529,8 @@ def render(state: DashboardState) -> Layout:
 
     layout["header"].update(_render_header(state))
     layout["slots"].update(_render_slots(state))
-    layout["progress"].update(_render_progress(state))
-    layout["events"].update(_render_events(state))
+    layout["progress"].update(_render_progress(state, max_rows=max_file_rows))
+    layout["events"].update(_render_events(state, max_lines=max_event_lines))
 
     return layout
 
@@ -745,7 +801,7 @@ def run_with_dashboard(
 
     try:
         with Live(
-            render(state),
+            render(state, console.size.height),
             console=console,
             refresh_per_second=10,
             screen=False,
@@ -778,11 +834,12 @@ def run_with_dashboard(
                     except Exception:
                         pass
 
-                # Render: show pause overlay when paused
+                # Render: recompute layout each frame using current terminal height
+                th = console.size.height
                 if state.paused or state.abort_pending:
-                    live.update(Group(render(state), _render_pause_overlay(state, cfg)))
+                    live.update(Group(render(state, th), _render_pause_overlay(state, cfg)))
                 else:
-                    live.update(render(state))
+                    live.update(render(state, th))
 
                 time.sleep(0.1)
 
@@ -798,7 +855,7 @@ def run_with_dashboard(
                     state.completion_tokens = tok.get("completion_tokens", state.completion_tokens)
                     state.estimated_cost_usd = tok.get("estimated_cost_usd", state.estimated_cost_usd)
 
-            live.update(render(state))
+            live.update(render(state, console.size.height))
 
     except KeyboardInterrupt:
         abort_event.set()
