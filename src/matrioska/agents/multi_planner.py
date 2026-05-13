@@ -25,6 +25,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from matrioska.core.config import Config
 from matrioska.core.events import EventBus
 from matrioska.core.state import Architecture, FileSpec
+from matrioska.core.text_utils import parse_json_safe
 from matrioska.llm.client import LLMClient
 from matrioska.memory.episodic import EpisodicMemory
 from matrioska.memory.procedural import ProceduralMemory
@@ -176,7 +177,7 @@ class MultiPlanner:
                 json_schema=_META_SCHEMA,
                 json_mode=True,
             )
-            data = json.loads(resp.text)
+            data = parse_json_safe(resp.text)
             return data.get("subproblems", []), data.get("shared_interface", {})
         except Exception as e:
             logger.error("Meta-planner LLM call failed: %s", e)

@@ -17,10 +17,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from matrioska.core.config import Config
-from matrioska.core.events import EventBus
-from matrioska.core.state import FileArtifact, FileSpec
-from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.agents.reflector")
 
@@ -111,14 +107,9 @@ class ReflectorAgent:
         )
 
         try:
-            result = json.loads(resp.text)
-        except Exception:
-            try:
-                from json_repair import repair_json
-
-                result = json.loads(repair_json(resp.text))
-            except Exception:
-                return {"score": 5, "should_repair": False}
+            result = parse_json_safe(resp.text)
+        except ValueError:
+            return {"score": 5, "should_repair": False}
 
         key = spec.filename
         if key not in self._reflections:
@@ -148,3 +139,5 @@ class ReflectorAgent:
     def _emit(self, name: str, **data: Any) -> None:
         if self.bus:
             self.bus.emit_named(name, **data)
+from matrioska.core.text_utils import parse_json_safe
+from matrioska.llm.client import LLMClient

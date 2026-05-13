@@ -12,10 +12,6 @@ import logging
 import time
 from typing import Any, Dict, List, Optional
 
-from matrioska.core.config import Config
-from matrioska.core.events import EventBus
-from matrioska.core.state import Architecture
-from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.agents.judge")
 
@@ -127,7 +123,7 @@ class JudgeAgent:
                 model_spec=spec,
                 json_mode=True,
             )
-            data = json.loads(resp.text)
+            data = parse_json_safe(resp.text)
             return int(data.get("best_index", 0))
         except Exception as e:
             logger.warning("File evaluation failed: %s", e)
@@ -153,20 +149,12 @@ class JudgeAgent:
     @staticmethod
     def _parse_judgment(raw: str, n_candidates: int) -> Optional[int]:
         try:
-            data = json.loads(raw)
+            data = parse_json_safe(raw)
             idx = int(data.get("winner_index", 0))
             if 0 <= idx < n_candidates:
                 return idx
         except Exception:
-            try:
-                from json_repair import repair_json
-
-                data = json.loads(repair_json(raw))
-                idx = int(data.get("winner_index", 0))
-                if 0 <= idx < n_candidates:
-                    return idx
-            except Exception:
-                pass
+            pass
 
         # Last-resort: find the first number that looks like an index
         import re
@@ -181,3 +169,5 @@ class JudgeAgent:
     def _emit(self, name: str, **data: Any) -> None:
         if self.bus:
             self.bus.emit_named(name, **data)
+from matrioska.core.text_utils import parse_json_safe
+from matrioska.llm.client import LLMClient

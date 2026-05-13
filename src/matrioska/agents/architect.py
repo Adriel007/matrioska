@@ -16,6 +16,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from matrioska.core.config import Config, ModelSpec
 from matrioska.core.events import EventBus
 from matrioska.core.state import Architecture, FileSpec
+from matrioska.core.text_utils import parse_json_safe, strip_thinking
 from matrioska.llm.client import LLMClient
 from matrioska.memory.episodic import EpisodicMemory, RunNote
 from matrioska.memory.procedural import ProceduralMemory
@@ -217,15 +218,10 @@ class ArchitectAgent:
             return None
 
         try:
-            data = json.loads(raw)
-        except Exception:
-            try:
-                from json_repair import repair_json
-
-                data = json.loads(repair_json(raw))
-            except Exception as e:
-                logger.error("Architect JSON unparseable: %s", e)
-                return None
+            data = parse_json_safe(raw)
+        except ValueError as e:
+            logger.error("Architect JSON unparseable: %s", e)
+            return None
 
         if "instructs" in data and "files" in data.get("instructs", {}):
             files_data = data["instructs"]["files"]

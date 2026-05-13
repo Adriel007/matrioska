@@ -20,7 +20,7 @@ from typing import Any, Dict, List, Optional, Tuple
 from matrioska.core.config import Config, ModelSpec
 from matrioska.core.events import EventBus
 from matrioska.core.state import FileArtifact, FileSpec
-from matrioska.core.text_utils import strip_fences
+from matrioska.core.text_utils import strip_fences, parse_json_safe, strip_thinking
 from matrioska.llm.client import LLMClient, STD_TOOLS, ChatResponse
 from matrioska.llm.circuit import route_model_for_extension, is_small_model
 
@@ -502,21 +502,18 @@ def _parse_json_response(text: str) -> Tuple[str, Dict[str, Any]]:
     from matrioska.core.text_utils import sanitize_output
 
     raw = text.strip()
-    # The model may wrap even JSON in fences sometimes
+    # Strip thinking tokens then fences before JSON parse
+    raw = strip_thinking(raw)
     if raw.startswith("```"):
         raw = re.sub(r'^```[a-zA-Z0-9_.\-]*\n?', '', raw)
         raw = re.sub(r'\n?```[^\n]*$', '', raw).strip()
 
     parsed: Dict[str, Any] = {}
     try:
-        parsed = json.loads(raw)
-    except Exception:
-        try:
-            from json_repair import repair_json
-            parsed = json.loads(repair_json(raw))
-        except Exception:
-            # Last resort: treat the whole text as content
-            return sanitize_output(text), {}
+        parsed = parse_json_safe(raw)
+    except ValueError:
+        # Last resort: treat the whole text as content
+        return sanitize_output(text), {}
 
     if not isinstance(parsed, dict):
         return sanitize_output(text), {}
