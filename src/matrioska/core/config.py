@@ -71,6 +71,10 @@ class Config:
     # ── Phase 1: Architecture ─────────────────────────────────────────────
     architect_candidates: int = 3       # N for Tree-of-Thoughts  # env: MATRIOSKA_ARCHITECT_CANDIDATES
     architect_temperature: float = 0.7  # Higher for diversity    # env: MATRIOSKA_ARCHITECT_TEMPERATURE
+    # Thinking models (Nemotron, Trinity, DeepSeek-R1) consume most of their
+    # token budget on <think> blocks before the JSON — give architect more room.
+    # Set to 0 to inherit max_tokens.
+    architect_max_tokens: int = 16384   # env: MATRIOSKA_ARCHITECT_MAX_TOKENS
     enable_tot: bool = True             # Enable Tree-of-Thoughts voting  # env: MATRIOSKA_ENABLE_TOT
 
     # ── Phase 2: Generation ───────────────────────────────────────────────
@@ -180,13 +184,20 @@ class Config:
         if role == "architect":
             temp = self.architect_temperature
 
+        # Architects get a larger token budget so thinking models have room
+        # to produce <think> blocks AND a complete architecture JSON.
+        if role == "architect" and self.architect_max_tokens > 0:
+            max_tok = self.architect_max_tokens
+        else:
+            max_tok = self.max_tokens
+
         return ModelSpec(
             provider=provider_override,
             model=model_override,
             base_url=url_override,
             api_key=key_override,
             temperature=temp,
-            max_tokens=self.max_tokens,
+            max_tokens=max_tok,
             thinking=self.thinking,
         )
 
@@ -241,7 +252,7 @@ _BOOL_FLAGS = {
     "quick", "enable_vault", "stream_tokens", "enable_multi_plan",
     "skip_validation",
 }
-_INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",
+_INT_FIELDS = {"max_tokens", "architect_max_tokens", "max_repairs", "max_depth", "retrieve_k",
                "architect_candidates", "sandbox_timeout", "sandbox_max_repairs", "serve_port"}
 _FLOAT_FIELDS = {"temperature", "architect_temperature"}
 _PATH_FIELDS = {"work_dir"}
