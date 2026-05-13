@@ -49,9 +49,16 @@ _TOOL_CALL_FUNC_RE = re.compile(
 )
 
 # <tool_call>finish\n<arg_key>content</arg_key>...<arg_value>CONTENT</arg_value>
-# Some models use an XML-like tag format for tool args.
+# XML-like tag format used by some models.
 _TOOL_CALL_XML_RE = re.compile(
     r'(?:.*?)<tool_call>\s*finish.*?<arg_value>(.*?)(?:</arg_value>|$)',
+    re.DOTALL,
+)
+
+# <tool_call>finish\ncontent="CONTENT"  — key=value format, no parens/arg tags.
+# Seen in: poolside/laguna, some OpenRouter-routed models.
+_TOOL_CALL_KV_RE = re.compile(
+    r'(?:.*?)<tool_call>\s*finish\s*\n\s*content=(["\'])(.*?)(\1)\s*(?:</tool_call>)?$',
     re.DOTALL,
 )
 
@@ -59,16 +66,16 @@ _TOOL_CALL_XML_RE = re.compile(
 def _extract_tool_call_content(text: str) -> str | None:
     """Extract the 'content' argument from a <tool_call>finish(...)</tool_call> block.
 
-    Models that lack native tool-use support sometimes emit the tool call as
-    literal text in one of two formats:
-      - Function style:  <tool_call>finish(content="...", ...)</tool_call>
-      - XML-arg style:   <tool_call>finish\\n<arg_key>content</arg_key>\\n<arg_value>...</arg_value>
+    Handles four formats emitted by models without native tool-use support:
+      1. Function:  <tool_call>finish(content="...", ...)</tool_call>
+      2. XML args:  <tool_call>finish\\n<arg_key>content</arg_key>\\n<arg_value>...</arg_value>
+      3. KV inline: <tool_call>finish\\ncontent="..."
+         (used by poolside/laguna and similar)
 
     Returns the extracted content string, or None if no match.
     """
     m = _TOOL_CALL_FUNC_RE.match(text)
     if m:
-        # Unescape JSON string escapes (\n, \t, \", \\)
         import json as _json
         try:
             return _json.loads(f'"{m.group(1)}"')
@@ -78,6 +85,10 @@ def _extract_tool_call_content(text: str) -> str | None:
     m = _TOOL_CALL_XML_RE.match(text)
     if m:
         return m.group(1).strip()
+
+    m = _TOOL_CALL_KV_RE.match(text)
+    if m:
+        return m.group(2)
 
     return None
 

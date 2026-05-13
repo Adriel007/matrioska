@@ -331,6 +331,29 @@ def _generate_file(
                     last_errors = [f"Interface test failed: {f}" for f in last_test_failures]
                     continue
 
+            # For JSON config files: if the generator omitted shared_state_updates,
+            # parse the generated JSON and extract declared shared_state_writes keys
+            # automatically. This prevents downstream files from receiving __auto__
+            # placeholders when the model didn't explicitly propagate config values.
+            if spec.extension == "json" and not updates and content:
+                try:
+                    import json as _json
+                    parsed = _json.loads(content)
+                    if isinstance(parsed, dict):
+                        extracted = {
+                            k: parsed[k]
+                            for k in spec.shared_state_writes
+                            if k in parsed
+                        }
+                        if extracted:
+                            logger.debug(
+                                "Auto-extracted %d key(s) from %s into shared_state",
+                                len(extracted), spec.filename,
+                            )
+                            updates = extracted
+                except Exception:
+                    pass
+
             # Auto-populate shared_state
             for k in spec.shared_state_writes:
                 if k not in state.shared_state:
