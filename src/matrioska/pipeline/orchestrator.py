@@ -210,7 +210,7 @@ class Matrioska:
             logger.info("--quick: skipping Phase 3 verification")
             verify_results = {"overall_ok": True, "skipped": "quick mode"}
         else:
-            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics)
+            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics, llm=self.llm)
         self.graph.save_checkpoint(label="after_verification")
 
         # ── Finalize ───────────────────────────────────────────────────
@@ -245,10 +245,10 @@ class Matrioska:
 
         if state.status == PipelineStatus.GENERATING:
             gen_ok = run_phase2(state, self.cfg, self.llm, self.bus, self.depth)
-            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics)
+            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics, llm=self.llm)
         elif state.status == PipelineStatus.VERIFYING:
             gen_ok = all(a.status == "done" for a in state.artifacts.values())
-            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics)
+            verify_results = run_phase3(state, self.cfg, self.bus, self.metrics, llm=self.llm)
         else:
             return self._result(state, state.status.value)
 

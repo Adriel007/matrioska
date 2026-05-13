@@ -1,22 +1,24 @@
 """
-Phase 3: Verification & Integration — execute, validate contracts, cross-file check.
+Phase 3: Verification & Integration — execute, validate contracts, sandbox repair.
 
-The final quality gate before delivering output:
-  1. Contract validation (did every file fulfill its writes?)
-  2. Cross-file consistency check (do all reads have a writer?)
-  3. Sandbox execution (optional, for runnable projects)
-  4. Replan on failure (returns to Phase 1 or 2)
+Quality gates (in order):
+  1. Contract validation   — every file fulfilled its shared_state_writes
+  2. Cross-file check      — every shared_state_reads has a declared writer
+  3. Sandbox execution     — run in Docker (or subprocess fallback)
+  4. Sandbox repair loop   — feed stderr back to Repairer, re-run (max N times)
 """
 
 from __future__ import annotations
 
 import logging
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 from matrioska.core.config import Config
-from matrioska.core.contracts import ContractValidator, ContractValidationResult
+from matrioska.core.contracts import ContractValidator
 from matrioska.core.events import EventBus, MetricsCollector
 from matrioska.core.state import RunState, PipelineStatus
+from matrioska.llm.client import LLMClient
 
 logger = logging.getLogger("matrioska.pipeline.phase3")
 
@@ -26,11 +28,9 @@ def run_phase3(
     cfg: Config,
     bus: Optional[EventBus] = None,
     metrics: Optional[MetricsCollector] = None,
+    llm: Optional[LLMClient] = None,
 ) -> Dict[str, Any]:
-    """Execute Phase 3: Verification & Integration.
-
-    Returns a dict with verification results.
-    """
+    """Execute Phase 3: Verification & Integration."""
     logger.info("=== Phase 3: Verification ===")
     state.status = PipelineStatus.VERIFYING
 
@@ -44,12 +44,9 @@ def run_phase3(
     # 1. Contract validation per-file
     contract_results = _validate_all_contracts(state)
     results["contract_validation"] = contract_results
-
     if not contract_results["all_ok"]:
         results["overall_ok"] = False
-        logger.warning(
-            "Contract violations found: %s", contract_results.get("violations", [])
-        )
+        logger.warning("Contract violations: %s", contract_results.get("violations", []))
 
     # 2. Cross-file consistency
     if state.contracts:
@@ -63,16 +60,16 @@ def run_phase3(
         }
         if not cross.ok:
             results["overall_ok"] = False
-            logger.warning("Cross-file consistency issues: %s", cross.violations)
+            logger.warning("Cross-file issues: %s", cross.violations)
 
-    # 3. Sandbox execution (optional)
+    # 3 + 4. Sandbox execution + repair loop
     if cfg.enable_sandbox:
-        sandbox_result = _run_sandbox(state, cfg)
+        sandbox_result = _run_sandbox_with_repair(state, cfg, llm, bus)
         results["sandbox_execution"] = sandbox_result
         if not sandbox_result.get("ok", True):
             results["overall_ok"] = False
 
-    # Record metrics
+    # Metrics
     if metrics is not None:
         for contract_ok in contract_results.get("per_file", {}).values():
             metrics.record_contract(contract_ok)
@@ -81,15 +78,15 @@ def run_phase3(
             if artifact.repair_count > 0:
                 metrics.record_repair(artifact.status == "done")
 
-    # Transition
+    # Status transition
     if results["overall_ok"]:
         state.status = PipelineStatus.DONE
         state.log("Phase 3 OK: all checks passed")
-        logger.info("Phase 3: All checks passed")
+        logger.info("Phase 3: all checks passed")
     else:
         state.status = PipelineStatus.FAILED
         state.log(f"Phase 3 FAILED: {results}")
-        logger.warning("Phase 3: Issues found — see verification results")
+        logger.warning("Phase 3: issues found")
 
     if bus:
         bus.emit_named("phase3_done", overall_ok=results["overall_ok"])
@@ -97,21 +94,20 @@ def run_phase3(
     return results
 
 
+# ── Helpers ───────────────────────────────────────────────────────────────────
+
+
 def _validate_all_contracts(state: RunState) -> Dict[str, Any]:
-    """Validate contracts for all generated files."""
     per_file: Dict[str, bool] = {}
     violations: List[str] = []
-
     for contract in state.contracts:
         if contract.file not in state.artifacts:
             violations.append(f"{contract.file}: declared but not generated")
             per_file[contract.file] = False
             continue
-
         result = ContractValidator.validate_writes(contract, state.shared_state)
         per_file[contract.file] = result.ok
         violations.extend(result.violations)
-
     return {
         "all_ok": all(per_file.values()) if per_file else True,
         "per_file": per_file,
@@ -119,38 +115,173 @@ def _validate_all_contracts(state: RunState) -> Dict[str, Any]:
     }
 
 
-def _run_sandbox(state: RunState, cfg: Config) -> Dict[str, Any]:
-    """Run the generated project in a Docker sandbox.
+def _run_sandbox_with_repair(
+    state: RunState,
+    cfg: Config,
+    llm: Optional[LLMClient],
+    bus: Optional[EventBus],
+) -> Dict[str, Any]:
+    """Run sandbox; if it fails, repair the offending file and retry.
 
-    This is a scaffold — full Docker sandbox implementation is in tools/sandbox.py.
-    For now, returns a placeholder.
+    Repair iterations: cfg.sandbox_max_repairs (default 2).
+    Each iteration:
+      - parse stderr for the erroring filename
+      - call Repairer with stderr as error signal
+      - update artifact in state
+      - re-run sandbox
     """
-    logger.info("Sandbox execution requested (scaffold — see tools/sandbox.py)")
+    from matrioska.tools.sandbox import SandboxExecutor, parse_erroring_file
 
-    # Detect runnable files
-    runnable_extensions = {"py", "js", "sh", "ts"}
-    runnable = [
-        a
+    executor = SandboxExecutor(
+        image=cfg.sandbox_image,
+        timeout=cfg.sandbox_timeout,
+        memory_limit="256m",
+    )
+
+    max_repairs = getattr(cfg, "sandbox_max_repairs", 2)
+    known_files = {
+        f"{a.name}.{a.extension}"
         for a in state.artifacts.values()
-        if a.extension in runnable_extensions and a.status == "done"
-    ]
+        if a.status == "done"
+    }
 
-    if not runnable:
-        return {"ok": True, "executed": False, "reason": "No runnable files found"}
+    if bus:
+        bus.emit_named("sandbox_started", image=cfg.sandbox_image)
 
-    # Scaffold: in full implementation, spin up Docker container and run
-    try:
-        from matrioska.tools.sandbox import SandboxExecutor
+    result = executor.run(state)
+    result_dict = result.to_dict()
 
-        executor = SandboxExecutor(
-            image=cfg.sandbox_image,
-            timeout=cfg.sandbox_timeout,
+    if bus:
+        bus.emit_named(
+            "sandbox_result",
+            ok=result.ok,
+            mode=result.mode,
+            exit_code=result.exit_code,
+            duration_s=result.duration_s,
+            entrypoint=result.entrypoint,
+            stderr=result.stderr[:300],
         )
-        result = executor.execute(state)
-        return {"ok": result["exit_code"] == 0, "executed": True, **result}
-    except ImportError:
-        logger.debug("SandboxExecutor not available (docker not installed?)")
-        return {"ok": True, "executed": False, "reason": "Sandbox not available"}
+
+    if result.ok or not result.executed or not llm:
+        return result_dict
+
+    # ── Repair loop ───────────────────────────────────────────────────────
+    for attempt in range(max_repairs):
+        logger.info(
+            "Sandbox failed (exit=%d) — repair attempt %d/%d",
+            result.exit_code, attempt + 1, max_repairs,
+        )
+
+        erroring_file = parse_erroring_file(result.stderr, known_files)
+        if erroring_file is None:
+            erroring_file = result.entrypoint  # fallback: repair entrypoint
+
+        if not erroring_file:
+            logger.warning("Cannot identify erroring file — skipping sandbox repair")
+            break
+
+        artifact_key = erroring_file
+        artifact = state.artifacts.get(artifact_key)
+        if artifact is None:
+            # Try without extension
+            artifact_key = Path(erroring_file).stem
+            artifact = state.artifacts.get(artifact_key)
+        if artifact is None:
+            logger.warning("Artifact %r not found in state — skipping repair", erroring_file)
+            break
+
+        if bus:
+            bus.emit_named(
+                "sandbox_repair_start",
+                attempt=attempt + 1,
+                file=erroring_file,
+                stderr=result.stderr[:300],
+            )
+
+        repaired = _repair_artifact(
+            artifact_key=artifact_key,
+            state=state,
+            stderr=result.stderr,
+            cfg=cfg,
+            llm=llm,
+            bus=bus,
+        )
+
+        if not repaired:
+            logger.warning("Sandbox repair produced no output for %s", erroring_file)
+            break
+
+        if bus:
+            bus.emit_named("sandbox_repair_done", attempt=attempt + 1, file=erroring_file)
+
+        # Re-run sandbox with updated artifacts
+        result = executor.run(state)
+        result_dict = result.to_dict()
+        result_dict["sandbox_repair_attempts"] = attempt + 1
+
+        if bus:
+            bus.emit_named(
+                "sandbox_result",
+                ok=result.ok,
+                mode=result.mode,
+                exit_code=result.exit_code,
+                attempt=attempt + 1,
+                stderr=result.stderr[:300],
+            )
+
+        if result.ok:
+            logger.info("Sandbox passed after %d repair(s)", attempt + 1)
+            break
+
+    return result_dict
+
+
+def _repair_artifact(
+    artifact_key: str,
+    state: RunState,
+    stderr: str,
+    cfg: Config,
+    llm: LLMClient,
+    bus: Optional[EventBus],
+) -> bool:
+    """Call Repairer on a single artifact using sandbox stderr as the error signal.
+
+    Updates the artifact content in state in-place.
+    Returns True if repair produced non-empty content.
+    """
+    from matrioska.agents.repairer import RepairerAgent
+
+    artifact = state.artifacts.get(artifact_key)
+    if artifact is None:
+        return False
+
+    # Build a minimal FileSpec so the Repairer has context
+    from matrioska.core.state import FileSpec
+    spec = FileSpec(
+        name=artifact.name,
+        extension=artifact.extension,
+        order=artifact.order,
+        shared_state_reads=artifact.shared_state_reads or [],
+        shared_state_writes=artifact.shared_state_writes or [],
+    )
+
+    repairer = RepairerAgent(cfg=cfg, llm=llm, bus=bus)
+    errors = [f"[sandbox stderr]\n{stderr}"]
+
+    try:
+        repaired_content = repairer.repair(
+            spec=spec,
+            previous_content=artifact.content,
+            errors=errors,
+            shared_context=state.shared_state,
+        )
     except Exception as e:
-        logger.warning("Sandbox execution failed: %s", e)
-        return {"ok": False, "executed": True, "error": str(e)}
+        logger.warning("Repairer raised during sandbox repair: %s", e)
+        return False
+
+    if not repaired_content:
+        return False
+
+    artifact.content = repaired_content
+    artifact.repair_count += 1
+    return True

@@ -9,9 +9,15 @@
   Enabled via `cfg.enable_multi_plan=True` / `MATRIOSKA_ENABLE_MULTI_PLAN=true`.
   Falls back to single ArchitectAgent if meta-planner returns < 2 sub-problems.
 
-- [ ] **Phase 3 sandbox execution** — `execute_container()` exists but untested.
-  Wire up the Docker sandbox with volume mounts and capture stdout/stderr/exit code
-  as validation signals that feed back into the repair loop.
+- [x] **Phase 3 sandbox execution** — `tools/sandbox.py::SandboxExecutor.run()`.
+  Auto-detects project type (python/node/shell/web/unknown). Docker preferred;
+  subprocess fallback when Docker unavailable. Python: auto-installs detected
+  third-party deps via pip inside container; server processes (uvicorn, flask.run)
+  get import-only check to avoid blocking. Web projects: HTML syntax validation
+  via stdlib html.parser. `phase3.py::_run_sandbox_with_repair()` feeds stderr
+  back to `RepairerAgent` when exit_code != 0, re-runs sandbox (max
+  `cfg.sandbox_max_repairs` iterations). Events: sandbox_started, sandbox_result,
+  sandbox_repair_start, sandbox_repair_done. 25 new tests in test_sandbox.py.
 
 ## Providers & Models
 

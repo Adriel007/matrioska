@@ -83,6 +83,7 @@ class Config:
     enable_sandbox: bool = False        # Docker sandbox execution  # env: MATRIOSKA_ENABLE_SANDBOX
     sandbox_timeout: int = 30           # Max execution seconds     # env: MATRIOSKA_SANDBOX_TIMEOUT
     sandbox_image: str = "python:3.11-slim"                         # env: MATRIOSKA_SANDBOX_IMAGE
+    sandbox_max_repairs: int = 2        # Repair iterations on sandbox failure  # env: MATRIOSKA_SANDBOX_MAX_REPAIRS
 
     # ── Memory ────────────────────────────────────────────────────────────
     retrieve_k: int = 3                                 # env: MATRIOSKA_RETRIEVE_K
@@ -241,7 +242,7 @@ _BOOL_FLAGS = {
     "skip_validation",
 }
 _INT_FIELDS = {"max_tokens", "max_repairs", "max_depth", "retrieve_k",
-               "architect_candidates", "sandbox_timeout", "serve_port"}
+               "architect_candidates", "sandbox_timeout", "sandbox_max_repairs", "serve_port"}
 _FLOAT_FIELDS = {"temperature", "architect_temperature"}
 _PATH_FIELDS = {"work_dir"}
 
