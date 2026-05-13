@@ -210,10 +210,15 @@ Each file in the DAG goes through:
 4. **Reflexion loop** (Shinn et al., 2023): verbal reflection → episodic memory → 91% HumanEval.
 
 ### Phase 3: Verification & Integration
-- Contract validation: every file's `shared_state_writes` populated and typed
-- Cross-file consistency: every `shared_state_reads` has a declared writer
-- Optional Docker sandbox execution with captured stdout/stderr/exit code
-- On failure: replan (returns to Phase 1 or 2 with error context)
+
+1. **Contract validation** — every file's `shared_state_writes` populated and typed
+2. **Cross-file consistency** — every `shared_state_reads` has a declared writer
+3. **Sandbox execution** (optional, `--sandbox`) — runs the project in a Docker container (subprocess fallback when Docker unavailable):
+   - Auto-detects project type: Python → `pip install` deps + `python main.py`; Node → `node index.js`; Shell → `bash`; Web → HTML syntax validation via stdlib
+   - Server processes (`uvicorn.run`, `flask.run`) get an import-only check to avoid blocking
+   - Captures stdout/stderr/exit code and duration
+4. **Sandbox repair loop** — on non-zero exit, stderr is fed to the Repairer as an error signal; the fixed file is re-executed (up to `sandbox_max_repairs` iterations, default 2)
+5. **Replan on failure** — returns to Phase 1 or 2 with error context
 
 ## Core Concepts
 
@@ -367,7 +372,7 @@ Supported hooks: `pre_generate`, `post_generate`, `pre_repair`, `phase1_done`, `
 |--------|-------------|-----------|
 | `contract_fulfillment_rate` | ~60% | ≥95% |
 | `first_pass_rate` | ~50% | ≥80% |
-| `execution_success_rate` | 0% | ≥70% |
+| `execution_success_rate` | 0% (sandbox was unimplemented) | ≥70% |
 | `repair_effectiveness` | ~40% | ≥75% |
 
 Save and compare regression baselines:
@@ -400,6 +405,9 @@ All options: CLI flags, env vars (`MATRIOSKA_<UPPER>`), or `.env` file.
 | `--max-depth` | `MATRIOSKA_MAX_DEPTH` | `2` | Max nested sub-agent depth |
 | `--parallel` | `MATRIOSKA_PARALLEL` | `true` | Parallel generation within DAG layers |
 | `--sandbox` | `MATRIOSKA_ENABLE_SANDBOX` | `false` | Enable Docker sandbox execution |
+| _(env only)_ | `MATRIOSKA_SANDBOX_MAX_REPAIRS` | `2` | Max Repairer iterations after sandbox failure |
+| _(env only)_ | `MATRIOSKA_SANDBOX_TIMEOUT` | `30` | Max seconds per sandbox run |
+| _(env only)_ | `MATRIOSKA_SANDBOX_IMAGE` | `python:3.11-slim` | Docker image for sandbox |
 | `--no-reflexion` | `MATRIOSKA_ENABLE_REFLEXION` | `true` | Disable Reflexion loop |
 | `--no-tot` | `MATRIOSKA_ENABLE_TOT` | `true` | Disable Tree-of-Thoughts voting |
 | `--retrieve-k` | `MATRIOSKA_RETRIEVE_K` | `3` | Past runs to retrieve as context |
@@ -433,6 +441,9 @@ Matrioska tracks estimated cost per run using a built-in pricing table (18 model
 | `mcp` not found | Optional dep | `pip install mcp` or omit `serve` subcommand |
 | Dashboard not rendering | Non-TTY / CI | Add `--no-dashboard` flag |
 | Port in use | MCP server | `--port <other>` or set `MATRIOSKA_SERVE_PORT` |
+| Sandbox skipped silently | Docker not running | Start Docker or set `MATRIOSKA_ENABLE_SANDBOX=false`; subprocess fallback activates automatically |
+| Sandbox timeout on server app | App blocks on `listen()` | Matrioska detects `uvicorn.run`/`flask.run` and runs import-only check instead |
+| `<tool_call>finish(...)` in generated files | Model without native tool-use | Fixed automatically by `sanitize_output()` — re-run the task |
 
 ## Theoretical Foundations
 
