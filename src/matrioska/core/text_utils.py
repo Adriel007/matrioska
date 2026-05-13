@@ -42,11 +42,51 @@ _FINISH_CALL_RE = re.compile(
 # Inline finish wrapped in backticks anywhere: `finish("foo")`
 _INLINE_FINISH_RE = re.compile(r'`finish\s*\([^)]*\)`')
 
+# <tool_call>finish(content="...", ...) — function-call style (content is JSON-escaped)
+_TOOL_CALL_FUNC_RE = re.compile(
+    r'(?:.*?)<tool_call>\s*finish\s*\(\s*content\s*=\s*"((?:[^"\\]|\\.)*)"(?:.*?)\)',
+    re.DOTALL,
+)
+
+# <tool_call>finish\n<arg_key>content</arg_key>...<arg_value>CONTENT</arg_value>
+# Some models use an XML-like tag format for tool args.
+_TOOL_CALL_XML_RE = re.compile(
+    r'(?:.*?)<tool_call>\s*finish.*?<arg_value>(.*?)(?:</arg_value>|$)',
+    re.DOTALL,
+)
+
+
+def _extract_tool_call_content(text: str) -> str | None:
+    """Extract the 'content' argument from a <tool_call>finish(...)</tool_call> block.
+
+    Models that lack native tool-use support sometimes emit the tool call as
+    literal text in one of two formats:
+      - Function style:  <tool_call>finish(content="...", ...)</tool_call>
+      - XML-arg style:   <tool_call>finish\\n<arg_key>content</arg_key>\\n<arg_value>...</arg_value>
+
+    Returns the extracted content string, or None if no match.
+    """
+    m = _TOOL_CALL_FUNC_RE.match(text)
+    if m:
+        # Unescape JSON string escapes (\n, \t, \", \\)
+        import json as _json
+        try:
+            return _json.loads(f'"{m.group(1)}"')
+        except Exception:
+            return m.group(1)
+
+    m = _TOOL_CALL_XML_RE.match(text)
+    if m:
+        return m.group(1).strip()
+
+    return None
+
 
 def sanitize_output(text: str) -> str:
     """Strip all known LLM output artifacts from generated code.
 
     Handles:
+    - <tool_call>finish(...)</tool_call> wrappers from non-tool-use models
     - Wrapped fences:  ```python\\n<code>\\n```
     - Trailing fence:  code ends with \\n``` followed by noise
     - finish() literal: model wrote finish() as Python text instead of tool call
@@ -55,6 +95,11 @@ def sanitize_output(text: str) -> str:
     t = text.strip()
     if not t:
         return t
+
+    # Case 0 — <tool_call>finish(...) wrapper (models without native tool use)
+    extracted = _extract_tool_call_content(t)
+    if extracted is not None:
+        return sanitize_output(extracted)   # recurse to strip any nested fences
 
     # Case 1 — entire output is wrapped in a code fence
     if t.startswith("```"):
