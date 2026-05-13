@@ -67,6 +67,26 @@ def run_phase1(
         state.log("Phase 1 FAILED: no valid architecture produced")
         return False
 
+    # Validate dependency graph: every shared_state_reads key must have a writer.
+    # An unsatisfied read means downstream generators receive empty context, which
+    # causes hallucinated tool calls or placeholder-filled output.
+    all_writes: set = set()
+    for f in arch.files:
+        all_writes.update(f.shared_state_writes)
+    unsatisfied = [
+        (f.filename, k)
+        for f in arch.files
+        for k in f.shared_state_reads
+        if k not in all_writes
+    ]
+    if unsatisfied:
+        logger.warning(
+            "Architecture has %d unsatisfied shared_state_reads (no writer): %s. "
+            "Proceeding — generator will receive empty context for these keys.",
+            len(unsatisfied),
+            unsatisfied[:5],
+        )
+
     state.architecture = arch
     state.project_name = arch.project_name
     state.contracts = arch.to_contracts()

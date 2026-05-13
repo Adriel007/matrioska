@@ -97,6 +97,8 @@ def sanitize_output(text: str) -> str:
     """Strip all known LLM output artifacts from generated code.
 
     Handles:
+    - <tool_call>NON-FINISH> calls (hallucinated tools like read_shared_state)
+      → returns empty string so the repair loop can retry with a better prompt
     - <tool_call>finish(...)</tool_call> wrappers from non-tool-use models
     - Wrapped fences:  ```python\\n<code>\\n```
     - Trailing fence:  code ends with \\n``` followed by noise
@@ -107,7 +109,12 @@ def sanitize_output(text: str) -> str:
     if not t:
         return t
 
-    # Case 0 — <tool_call>finish(...) wrapper (models without native tool use)
+    # Case 0a — <tool_call>NON-FINISH (hallucinated tool: read_shared_state, etc.)
+    # Return empty string so the validator flags it and the repair loop retries.
+    if re.search(r'<tool_call>\s*(?!finish)', t):
+        return ""
+
+    # Case 0b — <tool_call>finish(...) wrapper (models without native tool use)
     extracted = _extract_tool_call_content(t)
     if extracted is not None:
         return sanitize_output(extracted)   # recurse to strip any nested fences
