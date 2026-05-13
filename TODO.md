@@ -23,9 +23,10 @@
   Lookup: exact → prefix (longest wins) → substring fallback. Override via
   `MATRIOSKA_COST_PER_PROMPT_TOKEN` / `MATRIOSKA_COST_PER_COMPLETION_TOKEN` env vars.
 
-- [ ] **Configurable MoE extension map** — `EXTENSION_MODEL_MAP` is hardcoded in
-  `circuit.py`. Load from config so users can define their own per-extension routing
-  (e.g., `.py → deepseek-v3.2` on Groq).
+- [x] **Configurable MoE extension map** — `circuit.py::get_extension_model_map(cfg)`
+  reads `cfg.moe_extension_map` (JSON string) and merges per-key overrides on top of
+  `_DEFAULT_EXTENSION_MODEL_MAP`. Set via `MATRIOSKA_MOE_EXTENSION_MAP={"py":"deepseek-v3"}`.
+  Falls back to defaults silently on JSON parse error.
 
 - [ ] **Ollama provider test** — The native Ollama path works but is untested since
   v3 migration. Validate streaming and tool-use fallback.
@@ -72,11 +73,11 @@ passo de ser um vault Obsidian nativo.
 └── MATRIOSKA.md                   ← ProceduralMemory (já funciona)
 ```
 
-- [ ] **Drill-down interativo no REPL** — no REPL (`matrioska`), comandos de navegação
-  no vault: `/vault search <query>` busca em todos os escopos e mostra ranking,
-  `/vault project <nome>` abre overview do projeto, `/vault concept <nome>` abre nota
-  do conceito, `/vault related <projeto>` lista projetos com wikilinks comuns.
-  Resultado renderizado com Rich — links clicáveis no terminal (Cmd+Click).
+- [x] **Drill-down interativo no REPL** — `repl.py::_cmd_vault`. Subcomandos: `search`
+  (query + `--scope`), `list`, `project <name>` (abre architecture.md + patterns.md),
+  `concept <name>` (abre nota, lista conhecidos se não encontrado), `related <project>`
+  (BFS sobre wikilinks, ≤2 hops), `doctor` (relatório de saúde). Resultados com
+  Rich markup + links `file://` clicáveis no terminal (Cmd+Click).
 
 ### Outros itens de Memory
 
@@ -104,9 +105,10 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   índice ou prefixo de ID, carrega o estado no `session.last_result` para uso com `/diff`.
   StateGraph.list_checkpoints() + load_checkpoint() já existiam — apenas expostos.
 
-- [ ] **Comandos customizados** — arquivos `.matrioska/commands/meu-cmd.md` criam
-  `/meu-cmd` como slash command no REPL. Conteúdo do arquivo vira prompt injetado.
-  Permite criar workflows reutilizáveis por projeto.
+- [x] **Comandos customizados** — `repl.py::_load_custom_commands()`. Escaneia
+  `.matrioska/commands/*.md` no cwd ao iniciar o REPL. Cada arquivo vira um slash
+  command: nome = stem do arquivo (hifens → underscores), help = primeira linha,
+  ação = injeta o conteúdo do arquivo como task no pipeline.
 
 - [x] **Hook system** — `hooks.py::HookRunner`. Searches `.matrioska/hooks/` (project)
   then `~/.matrioska/hooks/` (global). Scripts named `pre_generate`, `post_generate`,
@@ -131,9 +133,11 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   but `mcp` is an optional dependency. Test end-to-end with Claude Desktop and
   verify all 3 tools (run, show, resume) work.
 
-- [ ] **Streaming results via API** — The Python API blocks until the pipeline
-  completes. Add an async `arun()` that yields events (phase start, file generated,
-  validation result) via the event bus.
+- [x] **Streaming results via API** — `api.py::MatrioskaStreaming.arun()`. Yields
+  `{"event": str, "data": dict, "timestamp": float}` dicts via `queue.Queue` +
+  sentinel pattern. Intercepts `bus.emit` to capture all events without patching
+  subscribers. Final `run_end` event carries full result; `run_error` on exception.
+  Usage: `for event in client.arun("task"): ...`
 
 ## Eval & Metrics
 
@@ -154,9 +158,10 @@ conversa com o agente, mais `/comandos` para controle. Inspirado no Claude Code.
   0%` because sandbox was never wired. Once sandbox works, measure whether
   generated code actually runs and produces correct output.
 
-- [ ] **Regression comparison** — `MetricComparator` compares against hardcoded
-  baselines. Load baselines from a JSON file so each CI run updates them,
-  tracking improvement (or regression) over time.
+- [x] **Regression comparison** — `metrics.py::load_baselines(path)` +
+  `save_baselines(metrics, path)`. `MetricComparator(baseline_file=Path(...))` loads
+  JSON baselines and falls back to hardcoded MVP defaults if file absent or unrecognised.
+  CI can call `save_baselines()` after each run to keep the file updated.
 
 ## Observability
 
