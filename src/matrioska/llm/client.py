@@ -286,10 +286,16 @@ class LLMClient:
         if spec.api_key:
             headers["Authorization"] = f"Bearer {spec.api_key}"
 
+        # Groq rejects temperature=0; clamp to a small positive value for providers
+        # known to enforce this restriction.
+        temperature = spec.temperature
+        if temperature == 0.0 and provider in ("groq",):
+            temperature = 0.01
+
         payload: Dict[str, Any] = {
             "model": spec.model,
             "messages": messages,
-            "temperature": spec.temperature,
+            "temperature": temperature,
             "max_tokens": spec.max_tokens,
         }
         if json_schema:
@@ -306,6 +312,10 @@ class LLMClient:
         if tools:
             payload["tools"] = tools
             payload["tool_choice"] = "auto"
+
+        # DeepSeek extended thinking (deepseek-reasoner model or spec.thinking flag)
+        if spec.thinking and "deepseek" in spec.base_url.lower():
+            payload["thinking"] = {"type": "enabled", "budget_tokens": min(2048, spec.max_tokens // 4)}
 
         # Streaming path: opt-in via cfg.stream_tokens. Disabled when tools
         # or json_schema are requested — chunked tool_calls reassembly is
@@ -379,12 +389,21 @@ class LLMClient:
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message", {}) or {}
 
+        # DeepSeek-R1 and similar reasoning models return the final answer in
+        # `content` and the chain-of-thought in `reasoning_content`. When
+        # content is empty (some model versions), fall back to reasoning_content
+        # with thinking-block stripping so callers always receive a non-empty text.
+        text = msg.get("content") or ""
+        if not text:
+            from matrioska.core.text_utils import strip_thinking
+            text = strip_thinking(msg.get("reasoning_content") or "")
+
         # OpenRouter (and some compatible providers) report actual cost in usage.
         raw_cost = usage.get("total_cost")
         actual_cost: Optional[float] = float(raw_cost) if raw_cost is not None else None
 
         return ChatResponse(
-            text=msg.get("content") or "",
+            text=text,
             tool_calls=_extract_tool_calls_openai(msg.get("tool_calls") or []),
             prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
             completion_tokens=int(usage.get("completion_tokens", 0) or 0),
@@ -588,10 +607,20 @@ class LLMClient:
             text = "".join(text_parts)
 
         usage = data.get("usage", {}) or {}
+        # Anthropic prompt caching: cache_read_input_tokens billed at 10%,
+        # cache_creation_input_tokens at 125% vs standard input. Adjust
+        # effective prompt_tokens so estimate_cost() reflects real billing.
+        base_input      = int(usage.get("input_tokens", 0) or 0)
+        cache_read      = int(usage.get("cache_read_input_tokens", 0) or 0)
+        cache_creation  = int(usage.get("cache_creation_input_tokens", 0) or 0)
+        # effective = non-cached input + 0.1× reads + 1.25× creation writes
+        effective_input = (base_input - cache_read - cache_creation
+                           + round(cache_read * 0.1)
+                           + round(cache_creation * 1.25))
         return ChatResponse(
             text=text,
             tool_calls=tool_calls,
-            prompt_tokens=int(usage.get("input_tokens", 0) or 0),
+            prompt_tokens=max(effective_input, 0),
             completion_tokens=int(usage.get("output_tokens", 0) or 0),
             raw=data,
         )

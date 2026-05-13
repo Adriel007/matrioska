@@ -164,33 +164,67 @@ class TokenTracker:
 # $/1M tokens {prompt, completion}
 
 _PRICING: Dict[str, Tuple[float, float]] = {
-    # OpenAI
-    "gpt-4o":           (2.50, 10.00),
-    "gpt-4o-mini":      (0.15,  0.60),
+    # ── OpenAI ───────────────────────────────────────────────────────────────
+    "gpt-4o":           (2.50,  10.00),
+    "gpt-4o-mini":      (0.15,   0.60),
     "gpt-4-turbo":      (10.0,  30.0),
     "gpt-4.5":          (75.0, 150.0),
     "o1":               (15.0,  60.0),
     "o1-mini":          (3.0,   12.0),
-    # Anthropic
+    "o3":               (10.0,  40.0),
+    "o3-mini":          (1.10,   4.40),
+    "o4-mini":          (1.10,   4.40),
+    # ── Anthropic ────────────────────────────────────────────────────────────
+    # Note: cache_read_input_tokens billed at 10%, cache_creation at 125%.
+    # The _anthropic_chat() method adjusts effective prompt_tokens accordingly.
     "claude-opus-4":    (15.0,  75.0),
+    "claude-opus-4-5":  (15.0,  75.0),
     "claude-sonnet-4":  (3.0,   15.0),
+    "claude-sonnet-4-5":(3.0,   15.0),
     "claude-haiku-4.5": (0.80,   4.0),
     "claude-haiku-4":   (0.80,   4.0),
-    # Groq (free tier approx)
-    "llama-3.3-70b-versatile": (0.59, 0.79),
-    "llama-3.1-8b-instant":    (0.05, 0.08),
-    "mixtral-8x7b-32768":      (0.24, 0.24),
-    "gemma2-9b-it":            (0.20, 0.20),
-    # DeepSeek
-    "deepseek-coder-v2":       (0.14, 0.28),
-    "deepseek-chat":           (0.27, 1.10),
-    # Mistral
-    "mistral-large-latest":    (2.00,  6.00),
-    "mistral-small-latest":    (0.20,  0.60),
-    # Together
-    "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo": (0.88, 0.88),
-    # NVIDIA
+    # ── Groq ─────────────────────────────────────────────────────────────────
+    "llama-3.3-70b-versatile":  (0.59, 0.79),
+    "llama-3.1-70b-versatile":  (0.59, 0.79),
+    "llama-3.1-8b-instant":     (0.05, 0.08),
+    "llama3-70b-8192":          (0.59, 0.79),
+    "llama3-8b-8192":           (0.05, 0.08),
+    "mixtral-8x7b-32768":       (0.24, 0.24),
+    "gemma2-9b-it":             (0.20, 0.20),
+    "gemma-7b-it":              (0.07, 0.07),
+    # ── DeepSeek ─────────────────────────────────────────────────────────────
+    "deepseek-chat":            (0.27,  1.10),
+    "deepseek-coder":           (0.14,  0.28),
+    "deepseek-coder-v2":        (0.14,  0.28),
+    "deepseek-r1":              (0.55,  2.19),   # reasoning model
+    "deepseek-reasoner":        (0.55,  2.19),
+    # ── Mistral ──────────────────────────────────────────────────────────────
+    "mistral-large-latest":     (2.00,  6.00),
+    "mistral-small-latest":     (0.20,  0.60),
+    "mistral-medium":           (2.70, 8.10),
+    "codestral-latest":         (0.20,  0.60),
+    "open-mistral-nemo":        (0.15,  0.15),
+    # ── Together AI ──────────────────────────────────────────────────────────
+    "meta-llama/Meta-Llama-3.1-70B-Instruct-Turbo":  (0.88, 0.88),
+    "meta-llama/Meta-Llama-3.1-8B-Instruct-Turbo":   (0.18, 0.18),
+    "meta-llama/Meta-Llama-3.1-405B-Instruct-Turbo": (3.50, 3.50),
+    "Qwen/Qwen2.5-72B-Instruct-Turbo":               (1.20, 1.20),
+    # ── NVIDIA NIM ───────────────────────────────────────────────────────────
     "meta/llama-3.1-405b-instruct": (3.99, 3.99),
+    "meta/llama-3.1-70b-instruct":  (0.99, 0.99),
+    "meta/llama-3.1-8b-instruct":   (0.20, 0.20),
+    # ── XAI (Grok) ───────────────────────────────────────────────────────────
+    "grok-3":           (3.00, 15.00),
+    "grok-3-mini":      (0.30,  0.50),
+    "grok-2":           (2.00, 10.00),
+    "grok-2-mini":      (0.20,  0.40),
+    # ── OpenRouter free tier (poolside, etc.) ─────────────────────────────────
+    # Free models: $0/$0 — no estimate needed (provider reports actual cost=0)
+    "poolside/laguna-m.1:free":                      (0.0,  0.0),
+    "poolside/laguna-xs.2:free":                     (0.0,  0.0),
+    "nvidia/nemotron-3-super-120b-a12b:free":        (0.0,  0.0),
+    "arcee-ai/trinity-large-thinking:free":          (0.0,  0.0),
+    "google/gemma-4-31b-it:free":                    (0.0,  0.0),
 }
 
 
