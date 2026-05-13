@@ -623,7 +623,12 @@ class DashboardSubscriber:
                 s.prompt_tokens += pt
                 s.completion_tokens += ct
                 s.total_calls += 1
-                s.estimated_cost_usd += (pt * 0.05 + ct * 0.08) / 1_000_000
+                actual = data.get("actual_cost_usd")
+                if actual is not None:
+                    s.estimated_cost_usd += float(actual)
+                else:
+                    # Rough in-dashboard estimate (overridden by final snapshot)
+                    s.estimated_cost_usd += (pt * 0.05 + ct * 0.08) / 1_000_000
                 slot_label = data.get("slot", "")
                 if slot_label:
                     s.update_slot(slot_label, calls=s.total_calls)
@@ -853,7 +858,10 @@ def run_with_dashboard(
                 if tok:
                     state.prompt_tokens = tok.get("prompt_tokens", state.prompt_tokens)
                     state.completion_tokens = tok.get("completion_tokens", state.completion_tokens)
-                    state.estimated_cost_usd = tok.get("estimated_cost_usd", state.estimated_cost_usd)
+                    # Prefer actual cost from provider; fall back to estimate
+                    final_cost = tok.get("actual_cost_usd") or tok.get("estimated_cost_usd")
+                    if final_cost is not None:
+                        state.estimated_cost_usd = final_cost
 
             live.update(render(state, console.size.height))
 

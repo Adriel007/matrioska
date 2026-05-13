@@ -451,7 +451,15 @@ class Matrioska:
         print(
             f"  Tokens:  prompt={ts['prompt_tokens']} completion={ts['completion_tokens']}"
         )
-        print(f"  Cost:    ~${ts.get('estimated_cost_usd', 0):.4f}")
+        if ts.get("actual_cost_usd") is not None:
+            print(f"  Cost:    ${ts['actual_cost_usd']:.6f}  (provider-reported)")
+        else:
+            print(f"  Cost:    ~${ts.get('estimated_cost_usd', 0):.6f}  (estimated)")
+        ms = self.metrics.snapshot()
+        if ms.get("execution_success_rate") is not None:
+            esr = ms["execution_success_rate"]
+            label = "✓" if esr == 1.0 else ("~" if esr > 0 else "✗")
+            print(f"  Sandbox: {label} execution_success={esr:.0%}")
         print(f"  Time:    {elapsed:.1f}s")
         print(f"  Work:    {self.work_dir}")
         print(f"{'=' * 80}")

@@ -105,30 +105,49 @@ class JSONLRecorder:
 
 
 class TokenTracker:
-    """Accumulates token usage across all LLM calls."""
+    """Accumulates token usage and cost across all LLM calls.
+
+    Prefers provider-reported actual cost (e.g. OpenRouter usage.total_cost)
+    over the built-in estimate. Falls back to estimate when actual is absent.
+    Tracks both for transparency: estimated_cost_usd vs actual_cost_usd.
+    """
 
     def __init__(self):
         self._lock = threading.Lock()
         self.prompt_tokens = 0
         self.completion_tokens = 0
         self.total_calls = 0
-        self.total_cost = 0.0
+        self.estimated_cost = 0.0
+        self.actual_cost: Optional[float] = None   # None = no provider reported cost
 
-    def record(self, prompt: int, completion: int, model: str = "") -> None:
+    def record(
+        self,
+        prompt: int,
+        completion: int,
+        model: str = "",
+        actual_cost_usd: Optional[float] = None,
+    ) -> None:
         with self._lock:
             self.prompt_tokens += prompt
             self.completion_tokens += completion
             self.total_calls += 1
-            self.total_cost += _estimate_cost(model, prompt, completion)
+            self.estimated_cost += _estimate_cost(model, prompt, completion)
+            if actual_cost_usd is not None:
+                self.actual_cost = (self.actual_cost or 0.0) + actual_cost_usd
 
     def snapshot(self) -> Dict[str, Any]:
         with self._lock:
+            # Prefer actual cost when at least one provider reported it
+            display_cost = self.actual_cost if self.actual_cost is not None else self.estimated_cost
             return {
                 "prompt_tokens": self.prompt_tokens,
                 "completion_tokens": self.completion_tokens,
                 "total_tokens": self.prompt_tokens + self.completion_tokens,
                 "total_calls": self.total_calls,
-                "estimated_cost_usd": round(self.total_cost, 4),
+                "estimated_cost_usd": round(self.estimated_cost, 6),
+                "actual_cost_usd": round(self.actual_cost, 6) if self.actual_cost is not None else None,
+                # Legacy key — used in dashboard and SUMMARY output
+                "cost_usd": round(display_cost, 6),
             }
 
     def __call__(self, event: Event) -> None:
@@ -137,6 +156,7 @@ class TokenTracker:
                 prompt=event.data.get("prompt_tokens", 0),
                 completion=event.data.get("completion_tokens", 0),
                 model=event.data.get("model", ""),
+                actual_cost_usd=event.data.get("actual_cost_usd"),
             )
 
 
@@ -259,7 +279,11 @@ class MetricsCollector:
                 "contract_fulfillment_rate": _safe_mean(self.contract_checks),
                 "first_pass_rate": _safe_mean(self.first_pass),
                 "repair_effectiveness": _safe_mean(self.repair_success),
-                "execution_success_rate": _safe_mean(self.execution_success),
+                # None when sandbox never ran (distinguishes "not measured" from 0%)
+                "execution_success_rate": (
+                    _safe_mean(self.execution_success)
+                    if self.execution_success else None
+                ),
                 "token_efficiency": sum(self.file_tokens.values()) / max(len(self.file_tokens), 1),
                 "total_files": len(self.file_tokens),
             }

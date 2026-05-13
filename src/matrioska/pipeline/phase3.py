@@ -77,6 +77,9 @@ def run_phase3(
             metrics.record_pass(artifact.repair_count == 0)
             if artifact.repair_count > 0:
                 metrics.record_repair(artifact.status == "done")
+        sb = results.get("sandbox_execution")
+        if sb and sb.get("executed"):
+            metrics.record_execution(sb.get("ok", False))
 
     # Status transition
     if results["overall_ok"]:

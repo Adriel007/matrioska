@@ -40,6 +40,9 @@ class ChatResponse:
     completion_tokens: int = 0
     model: str = ""
     provider: str = ""
+    # Actual cost reported by provider (e.g. OpenRouter usage.total_cost).
+    # None when provider doesn't report cost; fall back to estimate in that case.
+    actual_cost_usd: Optional[float] = None
     raw: Dict[str, Any] = field(default_factory=dict)
 
 
@@ -219,6 +222,7 @@ class LLMClient:
                     slot=slot.label,
                     prompt_tokens=resp.prompt_tokens,
                     completion_tokens=resp.completion_tokens,
+                    actual_cost_usd=resp.actual_cost_usd,
                     elapsed_s=round(time.time() - start_time, 2),
                 )
                 return resp
@@ -375,11 +379,16 @@ class LLMClient:
         choice = (data.get("choices") or [{}])[0]
         msg = choice.get("message", {}) or {}
 
+        # OpenRouter (and some compatible providers) report actual cost in usage.
+        raw_cost = usage.get("total_cost")
+        actual_cost: Optional[float] = float(raw_cost) if raw_cost is not None else None
+
         return ChatResponse(
             text=msg.get("content") or "",
             tool_calls=_extract_tool_calls_openai(msg.get("tool_calls") or []),
             prompt_tokens=int(usage.get("prompt_tokens", 0) or 0),
             completion_tokens=int(usage.get("completion_tokens", 0) or 0),
+            actual_cost_usd=actual_cost,
             raw=data,
         )
 
